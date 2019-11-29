@@ -1,0 +1,7 @@
+ExitOnFirstError: false
+FileExts: [ "jpg", "jpeg", "JPG", "JPEG" ]
+Tags:
+LogPath: exif.log
+Timezone: Asia/Singapore
+Verbose: false
+
