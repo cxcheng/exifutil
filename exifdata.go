@@ -33,7 +33,7 @@ type ExifData struct {
 }
 
 func parseInt(s string) (int, error) {
-	n, err := strconv.ParseInt(s, 10, 32)
+	n, err := strconv.ParseInt(s, 10, 64)
 	return int(n), err
 }
 
@@ -86,7 +86,7 @@ func ParseRational(s string) float64 {
 	}
 }
 
-func ReadExifData(exifPath string, loc *time.Location, tagsToReturn []string) (*ExifData, error) {
+func ReadExifData(exifPath string, loc *time.Location, trim bool, tagsToReturn []string) (*ExifData, error) {
 	f, err := os.Open(exifPath)
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func ReadExifData(exifPath string, loc *time.Location, tagsToReturn []string) (*
 		return nil, err
 	}
 	finfo, err := f.Stat()
-	return MakeExifData(exifPath, finfo, data, loc, tagsToReturn)
+	return MakeExifData(exifPath, finfo, data, loc, trim, tagsToReturn)
 }
 
 func makeExifEntry(id uint16, s string, t uint16) *ExifEntry {
@@ -115,10 +115,10 @@ func constructExifValue(e *ExifEntry) (interface{}, error) {
 	case exif.TypeByte:
 		var n64 int64
 		if s[0:2] == "0x" {
-			if n64, err = strconv.ParseInt(s[2:], 16, 32); err == nil {
-				v = int32(n64)
+			if n64, err = strconv.ParseInt(s[2:], 16, 64); err == nil {
+				v = n64
 			} else {
-				v = int32(0)
+				v = int64(0)
 			}
 		}
 	case exif.TypeShort, exif.TypeLong, exif.TypeSignedLong:
@@ -130,14 +130,14 @@ func constructExifValue(e *ExifEntry) (interface{}, error) {
 		}
 		var n int
 		if n, err = parseInt(s); err == nil {
-			v = int32(n)
+			v = int64(n)
 		} else {
-			v = int32(0)
+			v = int64(0)
 		}
 	case exif.TypeRational, exif.TypeSignedRational:
 		v = ParseRational(s)
 	default:
-		v = int32(0)
+		v = int64(0)
 	}
 	return v, err
 }
@@ -174,7 +174,7 @@ func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tag
 	}
 }
 
-func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Location, tagsToReturn []string) (*ExifData, error) {
+func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Location, trim bool, tagsToReturn []string) (*ExifData, error) {
 
 	exifData := ExifData{
 		entries: make(map[string]*ExifEntry),
@@ -241,6 +241,9 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		}
 
 		// Skip tag if it is not on the specified list; filter out empty tags
+		if trim {
+			valueString = strings.TrimSpace(valueString)
+		}
 		exifData.add(tagsToReturn, tagId, tagPath, valueString, tagType.Type())
 
 		return nil
@@ -255,17 +258,15 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 					// for some reason, the SubSecTime* tags have ASCII type, need Atoi
 					if v2str, ok := v2.(string); ok {
 						millis, err = parseInt(v2str)
-					} else if millis32, ok := v2.(int32); ok {
-						millis = int(millis32)
+					} else if millis64, ok := v2.(int64); ok {
+						millis = int(millis64)
 					}
-					// update to int32
-					exifData.values[subSecTagName] = int32(millis)
+					// update to int64
+					exifData.values[subSecTagName] = int64(millis)
 				}
 				var tv time.Time
 				if tv, err = ParseDate(e.s, millis, loc); err == nil {
 					exifData.values[dtTagName] = tv.UnixNano() // replace with Linux timevalue
-				} else {
-					println(err)
 				}
 			}
 		}
