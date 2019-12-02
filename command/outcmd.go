@@ -15,6 +15,16 @@ import (
 	exifutil "github.com/cxcheng/exifutil"
 )
 
+type outRecord struct {
+	cols  []string
+	colVs []interface{}
+}
+
+type statusRecord struct {
+	finished bool
+	err      error
+}
+
 type OutCmd struct {
 	conf        *Config
 	w           *os.File
@@ -27,6 +37,10 @@ type OutCmd struct {
 	trim        bool
 	tz          *time.Location
 	value       bool
+
+	out     chan outRecord
+	status  chan statusRecord
+	records []outRecord
 }
 
 func (cmd *OutCmd) Init(conf *Config) error {
@@ -99,18 +113,41 @@ func (cmd *OutCmd) Init(conf *Config) error {
 	return nil
 }
 
+func (cmd *OutCmd) sendString(s string) {
+	cmd.sendRecord([]string{s}, []interface{}{s})
+}
+
+func (cmd *OutCmd) sendRecord(cols []string, colVs []interface{}) {
+	if len(colVs) == 0 {
+		colVs = make([]interface{}, len(cols))
+		for i, col := range cols {
+			colVs[i] = col
+		}
+	} else if len(cols) != len(colVs) {
+		log.Printf("Skipping improperly formatted record")
+	} else if cmd.value {
+		for i, colV := range colVs {
+			// replace original value with the stringified numeric version
+			cols[i] = fmt.Sprintf("%v", colV)
+		}
+	}
+	cmd.out <- outRecord{cols: cols, colVs: colVs}
+}
+
 func (cmd *OutCmd) Run() {
-	// Walkthrough arguments
-	var err error
-	ctx := outCtx{cmd: cmd}
+	// Setup output and status channels
+	cmd.out = make(chan outRecord)
+	cmd.status = make(chan statusRecord)
 
 	// Preliminary output of CSV headers
-	if ctx.cmd.csvW != nil {
-		ctx.cmd.csvW.Write(ctx.cmd.cols)
+	if cmd.csvW != nil {
+		cmd.csvW.Write(cmd.cols)
 	}
 
+	// Walkthrough arguments
+	numFiles := 0
 	for _, arg := range flag.Args() {
-		err = filepath.Walk(arg,
+		err := filepath.Walk(arg,
 			func(path string, f os.FileInfo, err error) error {
 				// Filter out file based on extension
 				matchedExt := false
@@ -128,150 +165,114 @@ func (cmd *OutCmd) Run() {
 					if cmd.conf.Verbose {
 						log.Printf("Processing [%s]", path)
 					}
-					err = ctx.process(path, f, err)
-					if err != nil && cmd.conf.ExitOnFirstError {
-						// return on first error if flag set
-						return err
-					}
+					// Execute goroutine to process
+					numFiles += 1
+					go cmd.generateOutput(path)
 				}
 				return nil // ignore errors
 			})
+		if err != nil {
+
+		}
 	}
-	// If no error, finish the processing by sorting and emptying buffered input
-	if err == nil {
-		ctx.finish()
 
+	// Wait for all the concurrent file processors to return
+	for numFiles > 0 {
+		record := <-cmd.out
+		numFiles -= 1 // one file returned
+		if len(record.cols) == 0 {
+			// signal that all files has been sent for processing
+		}
+		if cmd.sortColIdx >= 0 {
+			// buffer
+			cmd.records = append(cmd.records, record)
+		} else {
+			cmd.writeOutput(&record)
+		}
+	}
+
+	// Sort and output any buffered record
+	if cmd.sortColIdx >= 0 && cmd.sortColIdx < len(cmd.cols) {
+		sort.Sort(cmd)
+	}
+	for _, record := range cmd.records {
+		cmd.writeOutput(&record)
 	}
 }
 
-type outCtx struct {
-	cmd     *OutCmd
-	records []outRecord
+func (cmd *OutCmd) writeOutput(record *outRecord) {
+	if cmd.csvW != nil {
+		cmd.csvW.Write(record.cols)
+		cmd.csvW.Flush()
+	} else {
+		// only 1 column written if not in CSV mode
+		fmt.Fprintln(cmd.w, record.cols[0])
+	}
 }
 
-type outRecord struct {
-	cols  []string
-	colVs []interface{}
-}
-
-func (ctx *outCtx) process(path string, f os.FileInfo, err error) error {
-	exifData, err := exifutil.ReadExifData(path, ctx.cmd.tz, ctx.cmd.conf.Trim, ctx.cmd.conf.Tags)
+func (cmd *OutCmd) generateOutput(path string) {
+	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.Tags)
 	if err != nil {
 		log.Fatalf("[%s]: [%s]\n", path, err)
 	} else {
 		// Apply optional filter
-		if ctx.cmd.filter == "" || exifData.Filter(ctx.cmd.filter) {
-			switch ctx.cmd.outType {
+		if cmd.filter == "" || exifData.Filter(cmd.filter) {
+			switch cmd.outType {
 			case "json":
-				ctx.out(exifData.Json())
+				cmd.sendString(exifData.Json())
 			case "keys":
 				for _, key := range exifData.Keys() {
-					ctx.out(key)
+					cmd.sendString(key)
 				}
 			default:
 				// if cols specified, evaluate; otherwise, print every field
-				if len(ctx.cmd.cols) > 0 {
-					outCols := make([]string, len(ctx.cmd.cols))
-					outColVs := make([]interface{}, len(ctx.cmd.cols))
-					for i, col := range ctx.cmd.cols {
+				if len(cmd.cols) > 0 {
+					outCols := make([]string, len(cmd.cols))
+					outColVs := make([]interface{}, len(cmd.cols))
+					for i, col := range cmd.cols {
 						outCols[i], outColVs[i] = exifData.Expr(col)
 					}
-					ctx.outRecord(outRecord{
-						cols:  outCols,
-						colVs: outColVs,
-					})
+					cmd.sendRecord(outCols, outColVs)
 				} else {
-					ctx.out(exifData.String())
+					cmd.sendString(exifData.String())
 				}
 			}
 		}
 	}
-	return err
 }
 
-func (ctx *outCtx) flush() {
-	if ctx.cmd.csvW != nil {
-		ctx.cmd.csvW.Flush()
-	}
+func (cmd *OutCmd) Len() int {
+	return len(cmd.records)
 }
 
-func (ctx *outCtx) out(s string) {
-	ctx.outRecord(outRecord{
-		cols:  []string{s},
-		colVs: []interface{}{s},
-	})
-}
-
-func (ctx *outCtx) outRecord(r outRecord) {
-	if ctx.cmd.sortColIdx >= 0 {
-		// buffer
-		ctx.records = append(ctx.records, r)
-	} else if ctx.cmd.csvW != nil {
-		if ctx.cmd.value {
-			cols := make([]string, len(r.cols))
-			for i, colV := range r.colVs {
-				cols[i] = fmt.Sprintf("%v", colV)
-			}
-			ctx.cmd.csvW.Write(cols)
-		} else {
-			ctx.cmd.csvW.Write(r.cols)
-		}
-	} else {
-		// only 1 column written if not in CSV mode
-		if ctx.cmd.value {
-			fmt.Fprintln(ctx.cmd.w, r.colVs[0])
-		} else {
-			fmt.Fprintln(ctx.cmd.w, r.cols[0])
-		}
-	}
-}
-
-func (ctx *outCtx) finish() {
-	// Sort
-	if ctx.cmd.sortColIdx >= 0 && ctx.cmd.sortColIdx < len(ctx.cmd.cols) {
-		sort.Sort(ctx)
-		ctx.cmd.sortColIdx = -1 // mark as done, or this becomes recursive
-	}
-
-	// Output
-	for _, r := range ctx.records {
-		ctx.outRecord(r)
-	}
-	ctx.flush()
-}
-
-func (ctx *outCtx) Len() int {
-	return len(ctx.records)
-}
-
-func (ctx *outCtx) Less(i, j int) bool {
+func (cmd *OutCmd) Less(i, j int) bool {
 	less := false
 	ok := false
-	vi := ctx.records[i].colVs[ctx.cmd.sortColIdx]
+	vi := cmd.records[i].colVs[cmd.sortColIdx]
 	switch vi.(type) {
 	case string:
 		var vj string
-		if vj, ok = ctx.records[j].colVs[ctx.cmd.sortColIdx].(string); ok {
+		if vj, ok = cmd.records[j].colVs[cmd.sortColIdx].(string); ok {
 			less = vi.(string) < vj
 		}
 	case float64:
 		var vj float64
-		if vj, ok = ctx.records[j].colVs[ctx.cmd.sortColIdx].(float64); ok {
+		if vj, ok = cmd.records[j].colVs[cmd.sortColIdx].(float64); ok {
 			less = vi.(float64) < vj
 		}
 	case int64:
 		var vj int64
-		if vj, ok = ctx.records[j].colVs[ctx.cmd.sortColIdx].(int64); ok {
+		if vj, ok = cmd.records[j].colVs[cmd.sortColIdx].(int64); ok {
 			less = vi.(int64) < vj
 		}
 	}
-	if ctx.cmd.sortReverse {
+	if cmd.sortReverse {
 		return ok && !less
 	} else {
 		return ok && less
 	}
 }
 
-func (ctx *outCtx) Swap(i, j int) {
-	ctx.records[i], ctx.records[j] = ctx.records[j], ctx.records[i]
+func (cmd *OutCmd) Swap(i, j int) {
+	cmd.records[i], cmd.records[j] = cmd.records[j], cmd.records[i]
 }
