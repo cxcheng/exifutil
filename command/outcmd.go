@@ -1,6 +1,7 @@
 package exifcommand
 
 import (
+	"C"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -16,13 +17,9 @@ import (
 )
 
 type outRecord struct {
+	path  string
 	cols  []string
 	colVs []interface{}
-}
-
-type statusRecord struct {
-	finished bool
-	err      error
 }
 
 type OutCmd struct {
@@ -39,11 +36,17 @@ type OutCmd struct {
 	value       bool
 
 	out     chan outRecord
-	status  chan statusRecord
 	records []outRecord
 }
 
+func logElapsedTime(start time.Time, label string) {
+	elapsed := time.Since(start)
+	log.Printf("**** [%s] elapsed time: %s", label, elapsed)
+}
+
 func (cmd *OutCmd) Init(conf *Config) error {
+	defer logElapsedTime(time.Now(), "Init")
+
 	cmd.conf = conf
 
 	// Process command-line arguments
@@ -74,7 +77,7 @@ func (cmd *OutCmd) Init(conf *Config) error {
 	if conf.Tz != "" {
 		var err error
 		if cmd.tz, err = time.LoadLocation(conf.Tz); err != nil {
-			log.Fatalf("Unable to load timezone [%s]", conf.Tz)
+			log.Printf("Unable to load timezone [%s]", conf.Tz)
 			return err
 		}
 	} else {
@@ -113,11 +116,11 @@ func (cmd *OutCmd) Init(conf *Config) error {
 	return nil
 }
 
-func (cmd *OutCmd) sendString(s string) {
-	cmd.sendRecord([]string{s}, []interface{}{s})
+func (cmd *OutCmd) sendString(path string, s string) {
+	cmd.sendRecord(path, []string{s}, []interface{}{s})
 }
 
-func (cmd *OutCmd) sendRecord(cols []string, colVs []interface{}) {
+func (cmd *OutCmd) sendRecord(path string, cols []string, colVs []interface{}) {
 	if len(colVs) == 0 {
 		colVs = make([]interface{}, len(cols))
 		for i, col := range cols {
@@ -131,13 +134,14 @@ func (cmd *OutCmd) sendRecord(cols []string, colVs []interface{}) {
 			cols[i] = fmt.Sprintf("%v", colV)
 		}
 	}
-	cmd.out <- outRecord{cols: cols, colVs: colVs}
+	cmd.out <- outRecord{path: path, cols: cols, colVs: colVs}
 }
 
 func (cmd *OutCmd) Run() {
+	defer logElapsedTime(time.Now(), "Run")
+
 	// Setup output and status channels
 	cmd.out = make(chan outRecord)
-	cmd.status = make(chan statusRecord)
 
 	// Preliminary output of CSV headers
 	if cmd.csvW != nil {
@@ -147,7 +151,7 @@ func (cmd *OutCmd) Run() {
 	// Walkthrough arguments
 	numFiles := 0
 	for _, arg := range flag.Args() {
-		err := filepath.Walk(arg,
+		_ = filepath.Walk(arg,
 			func(path string, f os.FileInfo, err error) error {
 				// Filter out file based on extension
 				matchedExt := false
@@ -166,29 +170,36 @@ func (cmd *OutCmd) Run() {
 						log.Printf("Processing [%s]", path)
 					}
 					// Execute goroutine to process
-					numFiles += 1
+					numFiles++
 					go cmd.generateOutput(path)
 				}
 				return nil // ignore errors
 			})
-		if err != nil {
-
-		}
 	}
 
 	// Wait for all the concurrent file processors to return
-	for numFiles > 0 {
+	numSuccesses, numErrors := 0, 0
+	for numToWait := numFiles; numToWait > 0; numToWait-- {
 		record := <-cmd.out
-		numFiles -= 1 // one file returned
 		if len(record.cols) == 0 {
-			// signal that all files has been sent for processing
-		}
-		if cmd.sortColIdx >= 0 {
-			// buffer
-			cmd.records = append(cmd.records, record)
+			numErrors++
+			if cmd.conf.ExitOnFirstError {
+				// Error received, exit if exit on first error
+				log.Printf("Exiting on first error: [%s]", record.path)
+				break
+			}
 		} else {
-			cmd.writeOutput(&record)
+			numSuccesses++
+			if cmd.sortColIdx >= 0 {
+				// buffer for sorting later
+				cmd.records = append(cmd.records, record)
+			} else {
+				cmd.writeOutput(&record)
+			}
 		}
+	}
+	if cmd.conf.Verbose {
+		log.Printf("Processed [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numErrors)
 	}
 
 	// Sort and output any buffered record
@@ -211,18 +222,22 @@ func (cmd *OutCmd) writeOutput(record *outRecord) {
 }
 
 func (cmd *OutCmd) generateOutput(path string) {
+	defer logElapsedTime(time.Now(), path)
+
 	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.Tags)
 	if err != nil {
-		log.Fatalf("[%s]: [%s]\n", path, err)
+		log.Printf("Error processing [%s]: [%s]\n", path, err)
+		// Report error
+		cmd.sendRecord(path, []string{}, []interface{}{})
 	} else {
 		// Apply optional filter
 		if cmd.filter == "" || exifData.Filter(cmd.filter) {
 			switch cmd.outType {
 			case "json":
-				cmd.sendString(exifData.Json())
+				cmd.sendString(path, exifData.Json())
 			case "keys":
 				for _, key := range exifData.Keys() {
-					cmd.sendString(key)
+					cmd.sendString(path, key)
 				}
 			default:
 				// if cols specified, evaluate; otherwise, print every field
@@ -232,14 +247,16 @@ func (cmd *OutCmd) generateOutput(path string) {
 					for i, col := range cmd.cols {
 						outCols[i], outColVs[i] = exifData.Expr(col)
 					}
-					cmd.sendRecord(outCols, outColVs)
+					cmd.sendRecord(path, outCols, outColVs)
 				} else {
-					cmd.sendString(exifData.String())
+					cmd.sendString(path, exifData.String())
 				}
 			}
 		}
 	}
 }
+
+/* Len(), Less(), Swap() implemented for sorting */
 
 func (cmd *OutCmd) Len() int {
 	return len(cmd.records)

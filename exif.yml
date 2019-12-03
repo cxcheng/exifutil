@@ -4,5 +4,5 @@ Tags: [] # Include all tags
 LogPath: exif.log
 Timezone: Asia/Singapore
 Trim: true
-Verbose: false
+Verbose: true
 

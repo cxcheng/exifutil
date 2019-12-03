@@ -169,7 +169,7 @@ func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tag
 		if v, err := constructExifValue(e); err == nil {
 			d.entries[tagPath], d.values[tagPath] = e, v
 		} else {
-			log.Fatalf("Skipping [%s] = %s: %s", tagPath, tagValue, err)
+			log.Printf("Skipping [%s] = %s: %s", tagPath, tagValue, err)
 		}
 	}
 }
@@ -196,7 +196,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 	visitor := func(fqIfdPath string, ifdIndex int, tagId uint16, tagType exif.TagType, valueContext exif.ValueContext) error {
 		defer func() {
 			if state := recover(); state != nil {
-				log.Fatalf("%s", state)
+				log.Printf("%s", state)
 			}
 		}()
 

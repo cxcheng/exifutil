@@ -17,7 +17,7 @@ import (
 func main() {
 	defer func() {
 		if state := recover(); state != nil {
-			log.Fatal("Exiting because of error...")
+			log.Printf("Exiting because of error...")
 		}
 	}()
 

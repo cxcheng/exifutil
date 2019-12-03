@@ -36,25 +36,16 @@ func MakeConfig() *Config {
 	var logF *os.File
 	if conf.LogPath != "" {
 		var err error
-		if logF, err = os.OpenFile(conf.LogPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666); err == nil {
+		if logF, err = os.OpenFile(conf.LogPath, os.O_RDWR|os.O_CREATE, 0666); err == nil {
 			log.SetOutput(logF)
 		} else {
 			log.SetOutput(os.Stderr)
 		}
-		defer logF.Close()
 	}
 
 	// Check and adjust configs
 	if len(conf.FileExts) == 0 {
 		conf.FileExts = []string{"heic", "HEIC", "jpg", "jpeg", "JPG", "JPEG", "tif", "TIF", "tiff", "TIFF"}
 	}
-
-	// Log status
-	if conf.Verbose {
-		log.Println("Configuration")
-		encoder := yaml.NewEncoder(logF)
-		encoder.Encode(conf)
-	}
-
 	return conf
 }
