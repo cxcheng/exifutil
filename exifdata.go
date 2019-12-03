@@ -196,7 +196,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 	visitor := func(fqIfdPath string, ifdIndex int, tagId uint16, tagType exif.TagType, valueContext exif.ValueContext) error {
 		defer func() {
 			if state := recover(); state != nil {
-				log.Printf("%s", state)
+				//log.Printf("%v", state)
 			}
 		}()
 

@@ -1,7 +1,6 @@
 package exifcommand
 
 import (
-	"C"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -27,6 +26,7 @@ type OutCmd struct {
 	w           *os.File
 	csvW        *csv.Writer
 	filter      string
+	filterExt   bool
 	cols        []string
 	outType     string
 	sortColIdx  int
@@ -35,17 +35,18 @@ type OutCmd struct {
 	tz          *time.Location
 	value       bool
 
-	out     chan outRecord
-	records []outRecord
+	out      chan outRecord
+	records  []outRecord
+	numFiles int
 }
 
-func logElapsedTime(start time.Time, label string) {
+func (cmd *OutCmd) logElapsedTime(start time.Time, label string) {
 	elapsed := time.Since(start)
-	log.Printf("**** [%s] elapsed time: %s", label, elapsed)
+	log.Printf("**** [%s] elapsed time: %s, %d goroutines", label, elapsed, cmd.numFiles)
 }
 
 func (cmd *OutCmd) Init(conf *Config) error {
-	defer logElapsedTime(time.Now(), "Init")
+	defer cmd.logElapsedTime(time.Now(), "Init")
 
 	cmd.conf = conf
 
@@ -53,6 +54,7 @@ func (cmd *OutCmd) Init(conf *Config) error {
 	var cols, outPath, sortCol string
 	flag.StringVar(&cols, "cols", "Sys/Name,Make,Model,DateTimeOriginal", "Columns to output")
 	flag.StringVar(&cmd.filter, "filter", "", "Expression to filter")
+	flag.BoolVar(&cmd.filterExt, "filterext", true, "Filter files by extension")
 	flag.StringVar(&sortCol, "sort", "-", "Sort column")
 	flag.BoolVar(&cmd.sortReverse, "reverse", false, "Reverse sort order")
 	flag.StringVar(&outPath, "out", "", "Output path")
@@ -138,7 +140,7 @@ func (cmd *OutCmd) sendRecord(path string, cols []string, colVs []interface{}) {
 }
 
 func (cmd *OutCmd) Run() {
-	defer logElapsedTime(time.Now(), "Run")
+	defer cmd.logElapsedTime(time.Now(), "Run")
 
 	// Setup output and status channels
 	cmd.out = make(chan outRecord)
@@ -149,13 +151,16 @@ func (cmd *OutCmd) Run() {
 	}
 
 	// Walkthrough arguments
-	numFiles := 0
 	for _, arg := range flag.Args() {
 		_ = filepath.Walk(arg,
 			func(path string, f os.FileInfo, err error) error {
+				// Skip directories
+				if f.IsDir() {
+					return nil
+				}
 				// Filter out file based on extension
 				matchedExt := false
-				if len(cmd.conf.FileExts) > 0 {
+				if cmd.filterExt && len(cmd.conf.FileExts) > 0 {
 					for _, ext := range cmd.conf.FileExts {
 						if filepath.Ext(path) == "."+ext {
 							matchedExt = true
@@ -165,12 +170,12 @@ func (cmd *OutCmd) Run() {
 					matchedExt = true
 				}
 				// Proceed to create context to process file
-				if matchedExt {
+				if !cmd.filterExt || matchedExt {
 					if cmd.conf.Verbose {
 						log.Printf("Processing [%s]", path)
 					}
 					// Execute goroutine to process
-					numFiles++
+					cmd.numFiles++
 					go cmd.generateOutput(path)
 				}
 				return nil // ignore errors
@@ -179,10 +184,11 @@ func (cmd *OutCmd) Run() {
 
 	// Wait for all the concurrent file processors to return
 	numSuccesses, numErrors := 0, 0
-	for numToWait := numFiles; numToWait > 0; numToWait-- {
+	for numFiles := cmd.numFiles; numFiles > 0; numFiles-- {
 		record := <-cmd.out
 		if len(record.cols) == 0 {
 			numErrors++
+			println(">>>>", record.path)
 			if cmd.conf.ExitOnFirstError {
 				// Error received, exit if exit on first error
 				log.Printf("Exiting on first error: [%s]", record.path)
@@ -199,7 +205,7 @@ func (cmd *OutCmd) Run() {
 		}
 	}
 	if cmd.conf.Verbose {
-		log.Printf("Processed [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numErrors)
+		log.Printf("Processed [%d] files, [%d] successes, [%d] errors", cmd.numFiles, numSuccesses, numErrors)
 	}
 
 	// Sort and output any buffered record
@@ -222,11 +228,11 @@ func (cmd *OutCmd) writeOutput(record *outRecord) {
 }
 
 func (cmd *OutCmd) generateOutput(path string) {
-	defer logElapsedTime(time.Now(), path)
+	defer cmd.logElapsedTime(time.Now(), path)
 
 	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.Tags)
 	if err != nil {
-		log.Printf("Error processing [%s]: [%s]\n", path, err)
+		log.Printf("Error processing [%s]: %s\n", path, err)
 		// Report error
 		cmd.sendRecord(path, []string{}, []interface{}{})
 	} else {

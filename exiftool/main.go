@@ -8,6 +8,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 
@@ -22,6 +23,11 @@ func main() {
 	}()
 
 	conf := exifcommand.MakeConfig()
+	if !conf.Verbose {
+		verbose := false
+		flag.BoolVar(&verbose, "verbose", false, "Verbose output, overrides config")
+	}
+
 	cmd := exifcommand.OutCmd{}
 	if err := cmd.Init(conf); err != nil {
 		log.Printf("Error initiializing: %s", err)
