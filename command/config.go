@@ -1,7 +1,6 @@
 package exifcommand
 
 import (
-	"flag"
 	"log"
 	"os"
 
@@ -18,25 +17,26 @@ type Config struct {
 	Verbose          bool     `yaml:"Verbose"`
 }
 
-func MakeConfig() *Config {
+func MakeConfig(confPath string) *Config {
 	conf := new(Config)
 
 	// Read from config file first if it exists
-	var confPath string
-	flag.StringVar(&confPath, "conf", "exif.yml", "Path of optional config YAML")
-	if f, err := os.Open(confPath); err == nil {
-		decoder := yaml.NewDecoder(f)
-		if err = decoder.Decode(conf); err != nil {
-			log.Panicf("Error parsing config [%s], exiting...", confPath)
+	if len(confPath) > 0 {
+		if f, err := os.Open(confPath); err == nil {
+			decoder := yaml.NewDecoder(f)
+			if err = decoder.Decode(conf); err != nil {
+				log.Panicf("Error parsing config [%s], exiting...", confPath)
+			}
+			defer f.Close() // close immediately after exiting this
 		}
-		defer f.Close()
 	}
 
 	// Setup log path
 	var logF *os.File
 	if conf.LogPath != "" {
 		var err error
-		if logF, err = os.OpenFile(conf.LogPath, os.O_RDWR|os.O_CREATE, 0666); err == nil {
+		if logF, err = os.Create(conf.LogPath); err == nil {
+			//if logF, err = os.OpenFile(conf.LogPath, os.O_RDWR|os.O_CREATE, 0666); err == nil {
 			log.SetOutput(logF)
 		} else {
 			log.SetOutput(os.Stderr)

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ type OutCmd struct {
 
 func (cmd *OutCmd) logElapsedTime(start time.Time, label string) {
 	elapsed := time.Since(start)
-	log.Printf("**** [%s] elapsed time: %s, %d goroutines", label, elapsed, cmd.numFiles)
+	log.Printf("**** [%s] elapsed time: %s, %d goroutines", label, elapsed, runtime.NumGoroutine())
 }
 
 func (cmd *OutCmd) Init(conf *Config) error {
@@ -52,7 +53,7 @@ func (cmd *OutCmd) Init(conf *Config) error {
 
 	// Process command-line arguments
 	var cols, outPath, sortCol string
-	flag.StringVar(&cols, "cols", "Sys/Name,Make,Model,DateTimeOriginal", "Columns to output")
+	flag.StringVar(&cols, "cols", "Sys/Name,Sys/Key,Make,Model,DateTimeOriginal", "Columns to output")
 	flag.StringVar(&cmd.filter, "filter", "", "Expression to filter")
 	flag.BoolVar(&cmd.filterExt, "filterext", true, "Filter files by extension")
 	flag.StringVar(&sortCol, "sort", "-", "Sort column")
@@ -188,7 +189,6 @@ func (cmd *OutCmd) Run() {
 		record := <-cmd.out
 		if len(record.cols) == 0 {
 			numErrors++
-			println(">>>>", record.path)
 			if cmd.conf.ExitOnFirstError {
 				// Error received, exit if exit on first error
 				log.Printf("Exiting on first error: [%s]", record.path)
@@ -228,9 +228,11 @@ func (cmd *OutCmd) writeOutput(record *outRecord) {
 }
 
 func (cmd *OutCmd) generateOutput(path string) {
-	defer cmd.logElapsedTime(time.Now(), path)
-
 	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.Tags)
+	defer func() {
+		cmd.logElapsedTime(time.Now(), fmt.Sprintf("%s - %s", path, exifData.Get("Sys/Key")))
+	}()
+
 	if err != nil {
 		log.Printf("Error processing [%s]: %s\n", path, err)
 		// Report error
@@ -239,6 +241,13 @@ func (cmd *OutCmd) generateOutput(path string) {
 		// Apply optional filter
 		if cmd.filter == "" || exifData.Filter(cmd.filter) {
 			switch cmd.outType {
+			case "detail":
+				lines := strings.Split(exifData.String(), "\r")
+				for _, line := range lines {
+					if len(line) > 0 {
+						cmd.sendString(path, line)
+					}
+				}
 			case "json":
 				cmd.sendString(path, exifData.Json())
 			case "keys":
@@ -254,8 +263,6 @@ func (cmd *OutCmd) generateOutput(path string) {
 						outCols[i], outColVs[i] = exifData.Expr(col)
 					}
 					cmd.sendRecord(path, outCols, outColVs)
-				} else {
-					cmd.sendString(path, exifData.String())
 				}
 			}
 		}

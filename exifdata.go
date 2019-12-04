@@ -3,7 +3,6 @@ package exifutil
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -32,54 +31,39 @@ type ExifData struct {
 	values  map[string]interface{}
 }
 
-func parseInt(s string) (int, error) {
-	n, err := strconv.ParseInt(s, 10, 64)
-	return int(n), err
-}
-
-func ParseDate(dateString string, millis int, loc *time.Location) (time.Time, error) {
+func ParseDate(dateString string, subsec int, loc *time.Location) (time.Time, error) {
 	// Parse for the format: YYYY:mm:DD HH:MM:SS
 	// Optionally add timezone
 
-	var n [6]int
-	var err error
-	start_pos, idx := 0, 0
-
-	for i := 0; i < len(dateString); i += 1 {
-		c := dateString[i]
-		if c == ':' || c == ' ' {
-			if n[idx], err = parseInt(dateString[start_pos:i]); err != nil {
-				// return as soon as we can't parse
-				return time.Time{}, err
-			}
-			idx += 1
-			start_pos = i + 1
-		}
+	if subsec > 0 {
+		dateString = fmt.Sprintf("%s.%d", dateString, subsec)
 	}
-	if idx != 5 {
-		return time.Time{}, errors.New(fmt.Sprintf("Date %s: %v", dateString, err))
-	}
-	if n[5], err = parseInt(dateString[start_pos:]); err != nil {
+	if t, err := time.Parse("2006:01:02 15:04:05.99", dateString); err != nil {
 		return time.Time{}, err
 	} else {
-		return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], millis*1000000, loc), nil
+		return t.In(loc), nil
 	}
+}
+
+func parseInt(s string) (int, error) {
+	n, err := strconv.ParseInt(s, 10, 64)
+	return int(n), err
 }
 
 func ParseRational(s string) float64 {
 	var n1, n2 int
 	var err error
 
-	start_pos := 0
-	for i := 0; i < len(s); i += 1 {
+	startPos := 0
+	for i := 0; i < len(s); i++ {
 		if s[i] == '/' {
-			if n1, err = parseInt(s[start_pos:i]); err != nil {
+			if n1, err = parseInt(s[startPos:i]); err != nil {
 				return 0.0
 			}
-			start_pos = i + 1
+			startPos = i + 1
 		}
 	}
-	if n2, err = parseInt(s[start_pos:]); err != nil {
+	if n2, err = parseInt(s[startPos:]); err != nil {
 		return float64(n1)
 	} else {
 		return float64(n1) / float64(n2)
@@ -161,6 +145,20 @@ func addToResults(tags []string, tagPath string) bool {
 		}
 	}
 	return true
+}
+
+func computeHash(s string) string {
+	const (
+		p uint64 = 31
+		m uint64 = 100000009
+	)
+	var hash uint64 = 0
+	var pow uint64 = 1
+	for _, c := range s {
+		hash = (hash + (uint64(c)-'a'+1)*pow) % m
+		pow = (pow * p) % m
+	}
+	return fmt.Sprintf("%016x", hash)
 }
 
 func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tagValue string, tagType uint16) {
@@ -253,59 +251,43 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		// Post-process DateTime tags
 		for dtTagName, subSecTagName := range dateTimeTags {
 			if e, found := exifData.entries[dtTagName]; found {
-				var millis int = 0
+				var subsec int = 0
 				if v2, found := exifData.values[subSecTagName]; found {
 					// for some reason, the SubSecTime* tags have ASCII type, need Atoi
 					if v2str, ok := v2.(string); ok {
-						millis, err = parseInt(v2str)
-					} else if millis64, ok := v2.(int64); ok {
-						millis = int(millis64)
+						subsec, err = parseInt(v2str)
+					} else if subsec64, ok := v2.(int64); ok {
+						subsec = int(subsec64)
 					}
 					// update to int64
-					exifData.values[subSecTagName] = int64(millis)
+					exifData.values[subSecTagName] = int64(subsec)
 				}
 				var tv time.Time
-				if tv, err = ParseDate(e.s, millis, loc); err == nil {
+				if tv, err = ParseDate(e.s, subsec, loc); err == nil {
 					exifData.values[dtTagName] = tv.UnixNano() // replace with Linux timevalue
 				}
 			}
 		}
 		// Insert file info
-		exifData.add(tagsToReturn, 0, "Sys/Tz", loc.String(), exif.TypeAscii)
-		exifData.add(tagsToReturn, 0, "Sys/Path", exifPath, exif.TypeAscii)
 		exifData.add(tagsToReturn, 0, "Sys/Name", filepath.Base(exifPath), exif.TypeAscii)
 		exifData.add(tagsToReturn, 0, "Sys/Len", fmt.Sprintf("%d", finfo.Size()), exif.TypeLong)
+		exifData.add(tagsToReturn, 0, "Sys/Path", exifPath, exif.TypeAscii)
+		exifData.add(tagsToReturn, 0, "Sys/Tz", loc.String(), exif.TypeAscii)
 		tv := finfo.ModTime()
 		exifData.add(tagsToReturn, 0, "Sys/Mod", tv.String(), exif.TypeAscii)
 		exifData.values["Sys/Mod"] = tv.UnixNano()
+
+		// Insert unique key
+		uniqueKey := exifData.Get("ImageUniqueID")
+		if uniqueKey == "" {
+			h := fmt.Sprintf("%s%s%s%s", filepath.Base(exifPath), exifData.Get("Make"), exifData.Get("Model"), exifData.Get("DateTimeOriginal"))
+			uniqueKey = computeHash(h)
+		} else {
+			uniqueKey = strings.TrimRight(uniqueKey, "0")
+		}
+		exifData.add(tagsToReturn, 0, "Sys/Key", uniqueKey, exif.TypeAscii)
 	}
 	return &exifData, err
-}
-
-func (d *ExifData) Eval(expr string) (interface{}, error) {
-	var err error
-	if len(expr) > 0 {
-		var eval *govaluate.EvaluableExpression
-		if eval, err = govaluate.NewEvaluableExpression(expr); err == nil {
-			var rs interface{}
-			if rs, err = eval.Evaluate(d.values); err == nil {
-				return rs, nil
-			}
-		}
-	}
-	return false, err
-}
-
-func (d *ExifData) Filter(expr string) bool {
-	if rs, err := d.Eval(expr); err == nil {
-		switch rs.(type) {
-		case bool:
-			return rs.(bool)
-		case string:
-			return len(rs.(string)) > 0
-		}
-	}
-	return false
 }
 
 func (d *ExifData) expandTag(rsBuf *bytes.Buffer, tagPath string) {
@@ -360,6 +342,32 @@ func (d *ExifData) Expr(expr string) (string, interface{}) {
 		}
 	}
 	return "", ""
+}
+
+func (d *ExifData) Eval(expr string) (interface{}, error) {
+	var err error
+	if len(expr) > 0 {
+		var eval *govaluate.EvaluableExpression
+		if eval, err = govaluate.NewEvaluableExpression(expr); err == nil {
+			var rs interface{}
+			if rs, err = eval.Evaluate(d.values); err == nil {
+				return rs, nil
+			}
+		}
+	}
+	return false, err
+}
+
+func (d *ExifData) Filter(expr string) bool {
+	if rs, err := d.Eval(expr); err == nil {
+		switch rs.(type) {
+		case bool:
+			return rs.(bool)
+		case string:
+			return len(rs.(string)) > 0
+		}
+	}
+	return false
 }
 
 func (d *ExifData) Get(tagPath string) string {

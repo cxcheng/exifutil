@@ -1,5 +1,5 @@
 ExitOnFirstError: false
-FileExts: [ "jpg", "jpeg", "JPG", "JPEG" ]
+FileExts: ["heic", "HEIC", "jpg", "jpeg", "JPG", "JPEG", "tif", "TIF", "tiff", "TIFF"]
 Tags: [] # Include all tags
 LogPath: exif.log
 Timezone: Asia/Singapore
