@@ -1,4 +1,4 @@
-package exifcommand
+package exiftool
 
 import (
 	"encoding/csv"
@@ -22,7 +22,7 @@ type outRecord struct {
 	colVs []interface{}
 }
 
-type OutCmd struct {
+type InputCtx struct {
 	conf        *Config
 	w           *os.File
 	csvW        *csv.Writer
@@ -41,12 +41,12 @@ type OutCmd struct {
 	numFiles int
 }
 
-func (cmd *OutCmd) logElapsedTime(start time.Time, label string) {
+func (cmd *InputCtx) logElapsedTime(start time.Time, label string) {
 	elapsed := time.Since(start)
 	log.Printf("**** [%s] elapsed time: %s, %d goroutines", label, elapsed, runtime.NumGoroutine())
 }
 
-func (cmd *OutCmd) Init(conf *Config) error {
+func (cmd *InputCtx) Init(conf *Config) error {
 	defer cmd.logElapsedTime(time.Now(), "Init")
 
 	cmd.conf = conf
@@ -119,11 +119,11 @@ func (cmd *OutCmd) Init(conf *Config) error {
 	return nil
 }
 
-func (cmd *OutCmd) sendString(path string, s string) {
+func (cmd *InputCtx) sendString(path string, s string) {
 	cmd.sendRecord(path, []string{s}, []interface{}{s})
 }
 
-func (cmd *OutCmd) sendRecord(path string, cols []string, colVs []interface{}) {
+func (cmd *InputCtx) sendRecord(path string, cols []string, colVs []interface{}) {
 	if len(colVs) == 0 {
 		colVs = make([]interface{}, len(cols))
 		for i, col := range cols {
@@ -140,7 +140,7 @@ func (cmd *OutCmd) sendRecord(path string, cols []string, colVs []interface{}) {
 	cmd.out <- outRecord{path: path, cols: cols, colVs: colVs}
 }
 
-func (cmd *OutCmd) Run() {
+func (cmd *InputCtx) Run() {
 	defer cmd.logElapsedTime(time.Now(), "Run")
 
 	// Setup output and status channels
@@ -189,7 +189,7 @@ func (cmd *OutCmd) Run() {
 		record := <-cmd.out
 		if len(record.cols) == 0 {
 			numErrors++
-			if cmd.conf.ExitOnFirstError {
+			if cmd.conf.ExitOnError {
 				// Error received, exit if exit on first error
 				log.Printf("Exiting on first error: [%s]", record.path)
 				break
@@ -217,7 +217,7 @@ func (cmd *OutCmd) Run() {
 	}
 }
 
-func (cmd *OutCmd) writeOutput(record *outRecord) {
+func (cmd *InputCtx) writeOutput(record *outRecord) {
 	if cmd.csvW != nil {
 		cmd.csvW.Write(record.cols)
 		cmd.csvW.Flush()
@@ -227,8 +227,8 @@ func (cmd *OutCmd) writeOutput(record *outRecord) {
 	}
 }
 
-func (cmd *OutCmd) generateOutput(path string) {
-	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.Tags)
+func (cmd *InputCtx) generateOutput(path string) {
+	exifData, err := exifutil.ReadExifData(path, cmd.tz, cmd.conf.Trim, cmd.conf.TagsToLoad)
 	defer func() {
 		cmd.logElapsedTime(time.Now(), fmt.Sprintf("%s - %s", path, exifData.Get("Sys/Key")))
 	}()
@@ -271,11 +271,11 @@ func (cmd *OutCmd) generateOutput(path string) {
 
 /* Len(), Less(), Swap() implemented for sorting */
 
-func (cmd *OutCmd) Len() int {
+func (cmd *InputCtx) Len() int {
 	return len(cmd.records)
 }
 
-func (cmd *OutCmd) Less(i, j int) bool {
+func (cmd *InputCtx) Less(i, j int) bool {
 	less := false
 	ok := false
 	vi := cmd.records[i].colVs[cmd.sortColIdx]
@@ -303,6 +303,6 @@ func (cmd *OutCmd) Less(i, j int) bool {
 	}
 }
 
-func (cmd *OutCmd) Swap(i, j int) {
+func (cmd *InputCtx) Swap(i, j int) {
 	cmd.records[i], cmd.records[j] = cmd.records[j], cmd.records[i]
 }

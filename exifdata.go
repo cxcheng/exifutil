@@ -70,7 +70,7 @@ func ParseRational(s string) float64 {
 	}
 }
 
-func ReadExifData(exifPath string, loc *time.Location, trim bool, tagsToReturn []string) (*ExifData, error) {
+func ReadExifData(exifPath string, loc *time.Location, trim bool, tagsToLoad []string) (*ExifData, error) {
 	f, err := os.Open(exifPath)
 	if err != nil {
 		return nil, err
@@ -80,50 +80,13 @@ func ReadExifData(exifPath string, loc *time.Location, trim bool, tagsToReturn [
 		return nil, err
 	}
 	finfo, err := f.Stat()
-	return MakeExifData(exifPath, finfo, data, loc, trim, tagsToReturn)
+	return MakeExifData(exifPath, finfo, data, loc, trim, tagsToLoad)
 }
 
 func makeExifEntry(id uint16, s string, t uint16) *ExifEntry {
 	e := new(ExifEntry)
 	e.id, e.s, e.t = id, s, t
 	return e
-}
-
-func constructExifValue(e *ExifEntry) (interface{}, error) {
-	var v interface{}
-	var err error = nil
-	s := strings.TrimSpace(e.s) // trm spaces before and after
-	switch e.t {
-	case exif.TypeAscii:
-		v = s
-	case exif.TypeByte:
-		var n64 int64
-		if s[0:2] == "0x" {
-			if n64, err = strconv.ParseInt(s[2:], 16, 64); err == nil {
-				v = n64
-			} else {
-				v = int64(0)
-			}
-		}
-	case exif.TypeShort, exif.TypeLong, exif.TypeSignedLong:
-		t := strings.TrimLeft(s, "0")
-		if len(t) > 1 {
-			s = t
-		} else {
-			s = "0"
-		}
-		var n int
-		if n, err = parseInt(s); err == nil {
-			v = int64(n)
-		} else {
-			v = int64(0)
-		}
-	case exif.TypeRational, exif.TypeSignedRational:
-		v = ParseRational(s)
-	default:
-		v = int64(0)
-	}
-	return v, err
 }
 
 func addToResults(tags []string, tagPath string) bool {
@@ -161,18 +124,14 @@ func computeHash(s string) string {
 	return fmt.Sprintf("%016x", hash)
 }
 
-func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tagValue string, tagType uint16) {
+func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tagType uint16, s string, v interface{}) {
 	if addToResults(tagsToInclude, tagPath) {
-		e := makeExifEntry(tagId, tagValue, tagType)
-		if v, err := constructExifValue(e); err == nil {
-			d.entries[tagPath], d.values[tagPath] = e, v
-		} else {
-			log.Printf("Skipping [%s] = %s: %s", tagPath, tagValue, err)
-		}
+		e := makeExifEntry(tagId, s, tagType)
+		d.entries[tagPath], d.values[tagPath] = e, v
 	}
 }
 
-func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Location, trim bool, tagsToReturn []string) (*ExifData, error) {
+func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Location, trim bool, tagsToLoad []string) (*ExifData, error) {
 
 	exifData := ExifData{
 		entries: make(map[string]*ExifEntry),
@@ -211,12 +170,6 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 			return nil // TO DO: should not be the case, but we need to ignore it
 		}
 
-		// Obtain the value
-		var valueString string
-		valueString, err = tagType.ResolveAsString(valueContext, true)
-
-		//fmt.Printf("++++ %s %s %s %s\n", ifdPath, it.Name, tagType.Name(), valueString)
-
 		// Compute tag path; exclude full path if it is part of the standard paths
 		var tagPath string
 		useFullPath := true
@@ -232,17 +185,20 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 			tagPath = it.Name
 		}
 
-		// Skip undefined types
-		if tagType.Type() == exif.TypeUndefined && len(valueString) > 0 {
-			log.Printf("Skipping [%s] -> [%s]: undefined type", tagPath, valueString)
-			return nil
-		}
+		// Compute the values
+		s, err1 := tagType.ResolveAsString(valueContext, true)
+		v, err2 := tagType.Resolve(valueContext)
+		if err1 != nil || err2 != nil {
+			log.Printf("Tag [%s] parsing error: %s %s", err1, err2)
+		} else {
+			if trim {
+				s = strings.TrimSpace(s)
+			}
 
-		// Skip tag if it is not on the specified list; filter out empty tags
-		if trim {
-			valueString = strings.TrimSpace(valueString)
+			// Skip tag if it is not on the specified list; filter out empty tags
+			exifData.add(tagsToLoad, tagId, tagPath, tagType.Type(), s, v)
+
 		}
-		exifData.add(tagsToReturn, tagId, tagPath, valueString, tagType.Type())
 
 		return nil
 	}
@@ -269,13 +225,12 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 			}
 		}
 		// Insert file info
-		exifData.add(tagsToReturn, 0, "Sys/Name", filepath.Base(exifPath), exif.TypeAscii)
-		exifData.add(tagsToReturn, 0, "Sys/Len", fmt.Sprintf("%d", finfo.Size()), exif.TypeLong)
-		exifData.add(tagsToReturn, 0, "Sys/Path", exifPath, exif.TypeAscii)
-		exifData.add(tagsToReturn, 0, "Sys/Tz", loc.String(), exif.TypeAscii)
+		exifData.add(tagsToLoad, 0, "Sys/Name", exif.TypeAscii, filepath.Base(exifPath), filepath.Base(exifPath))
+		exifData.add(tagsToLoad, 0, "Sys/Len", exif.TypeLong, fmt.Sprintf("%d", finfo.Size()), uint64(finfo.Size()))
+		exifData.add(tagsToLoad, 0, "Sys/Path", exif.TypeAscii, exifPath, exifPath)
+		exifData.add(tagsToLoad, 0, "Sys/Tz", exif.TypeAscii, loc.String(), loc.String())
 		tv := finfo.ModTime()
-		exifData.add(tagsToReturn, 0, "Sys/Mod", tv.String(), exif.TypeAscii)
-		exifData.values["Sys/Mod"] = tv.UnixNano()
+		exifData.add(tagsToLoad, 0, "Sys/Mod", exif.TypeAscii, tv.String(), tv)
 
 		// Insert unique key
 		uniqueKey := exifData.Get("ImageUniqueID")
@@ -285,7 +240,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		} else {
 			uniqueKey = strings.TrimRight(uniqueKey, "0")
 		}
-		exifData.add(tagsToReturn, 0, "Sys/Key", uniqueKey, exif.TypeAscii)
+		exifData.add(tagsToLoad, 0, "Sys/Key", exif.TypeAscii, uniqueKey, uniqueKey)
 	}
 	return &exifData, err
 }
@@ -313,7 +268,7 @@ func (d *ExifData) Expr(expr string) (string, interface{}) {
 			expr2 := expr[1:]
 			rsBuf := bytes.NewBufferString("")
 			state, pos := 0, 0
-			for i := 0; i < len(expr2); i += 1 {
+			for i := 0; i < len(expr2); i++ {
 				c := rune(expr2[i])
 				switch state {
 				case 0: // normal, ready

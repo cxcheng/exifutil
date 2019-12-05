@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	exifcommand "github.com/cxcheng/exifutil/command"
+	exiftool "github.com/cxcheng/exifutil/exiftool"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	// Read configuration if specified or default
 	var confPath string
 	flag.StringVar(&confPath, "conf", "exif.yml", "Path of optional config YAML")
-	conf := exifcommand.MakeConfig(confPath)
+	conf := exiftool.MakeConfig(confPath)
 
 	// Setup verbose param
 	if !conf.Verbose {
@@ -39,12 +39,12 @@ func main() {
 	}
 
 	// Run command
-	cmd := exifcommand.OutCmd{}
-	if err := cmd.Init(conf); err != nil {
+	ctx := exiftool.InputCtx{}
+	if err := ctx.Init(conf); err != nil {
 		log.Printf("Error initiializing: %s", err)
 		os.Exit(1)
 	}
-	cmd.Run()
+	ctx.Run()
 
 	// Exit
 	os.Exit(0)

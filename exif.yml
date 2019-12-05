@@ -1,8 +1,11 @@
-ExitOnFirstError: false
-FileExts: ["heic", "HEIC", "jpg", "jpeg", "JPG", "JPEG", "tif", "TIF", "tiff", "TIFF"]
-Tags: [] # Include all tags
-LogPath: exif.log
-Timezone: Asia/Singapore
-Trim: true
-Verbose: true
-
+log_path: exif.log
+input:
+  exit_on_error: false
+  file_exts: [] # empty => read all files
+  load_tags: [] # empty => load all tags
+  timezone: Asia/Singapore
+  trim: true # trim leading and trailing spaces
+database:
+  name: exif
+  uri: "mongodb://localhost:27017"
+verbose: true

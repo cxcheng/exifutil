@@ -1,4 +1,4 @@
-package exifcommand
+package exiftool
 
 import (
 	"log"
@@ -8,8 +8,6 @@ import (
 )
 
 type Config struct {
-	DBName      string   `yaml:"database:name"`
-	DBURI       string   `yaml:"database:uri"`
 	ExitOnError bool     `yaml:"input.exit_on_error"`
 	FileExts    []string `yaml:"input.file_exts"`
 	LogPath     string   `yaml:"log_path"`
