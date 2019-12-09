@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,31 +41,6 @@ func ParseDate(dateString string, subsec int, loc *time.Location) (time.Time, er
 		return time.Time{}, err
 	} else {
 		return t.In(loc), nil
-	}
-}
-
-func parseInt(s string) (int, error) {
-	n, err := strconv.ParseInt(s, 10, 64)
-	return int(n), err
-}
-
-func ParseRational(s string) float64 {
-	var n1, n2 int
-	var err error
-
-	startPos := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '/' {
-			if n1, err = parseInt(s[startPos:i]); err != nil {
-				return 0.0
-			}
-			startPos = i + 1
-		}
-	}
-	if n2, err = parseInt(s[startPos:]); err != nil {
-		return float64(n1)
-	} else {
-		return float64(n1) / float64(n2)
 	}
 }
 
@@ -124,8 +98,15 @@ func computeHash(s string) string {
 	return fmt.Sprintf("%016x", hash)
 }
 
-func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tagType uint16, s string, v interface{}) {
+func (d *ExifData) add(tagsToInclude []string, tagId uint16, tagPath string, tagType uint16, s string, v interface{}, trim bool) {
 	if addToResults(tagsToInclude, tagPath) {
+		// try trimming
+		if trim {
+			if s2, ok := v.(string); ok {
+				s = strings.TrimSpace(s)
+				v = strings.TrimSpace(s2)
+			}
+		}
 		e := makeExifEntry(tagId, s, tagType)
 		d.entries[tagPath], d.values[tagPath] = e, v
 	}
@@ -196,7 +177,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 			}
 
 			// Skip tag if it is not on the specified list; filter out empty tags
-			exifData.add(tagsToLoad, tagId, tagPath, tagType.Type(), s, v)
+			exifData.add(tagsToLoad, tagId, tagPath, tagType.Type(), s, v, trim)
 
 		}
 
@@ -204,33 +185,34 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 	}
 
 	if _, err = exif.Visit(exif.IfdStandard, im, ti, rawExif, visitor); err == nil {
-		// Post-process DateTime tags
+		// Post-process DateTime tags from pre-defined list of tags
 		for dtTagName, subSecTagName := range dateTimeTags {
 			if e, found := exifData.entries[dtTagName]; found {
-				var subsec int = 0
-				if v2, found := exifData.values[subSecTagName]; found {
-					// for some reason, the SubSecTime* tags have ASCII type, need Atoi
-					if v2str, ok := v2.(string); ok {
-						subsec, err = parseInt(v2str)
-					} else if subsec64, ok := v2.(int64); ok {
-						subsec = int(subsec64)
+				// For each DateTime tag, update with subsec tag if it exists
+				var subsecNano int
+				if subsecV, found := exifData.values[subSecTagName]; found {
+					// SubSecTime* tags have ASCII type, and are stored as ASCII fractions
+					if s, ok := subsecV.(string); ok {
+						var f float64
+						if _, err := fmt.Sscanf("0."+s, "%f", &f); err == nil {
+							subsecNano = int(f * 10000000000)
+						}
+						exifData.values[subSecTagName] = subsecNano
 					}
-					// update to int64
-					exifData.values[subSecTagName] = int64(subsec)
 				}
 				var tv time.Time
-				if tv, err = ParseDate(e.s, subsec, loc); err == nil {
-					exifData.values[dtTagName] = tv.UnixNano() // replace with Linux timevalue
+				if tv, err = ParseDate(e.s, subsecNano, loc); err == nil {
+					exifData.values[dtTagName] = tv
 				}
 			}
 		}
 		// Insert file info
-		exifData.add(tagsToLoad, 0, "Sys/Name", exif.TypeAscii, filepath.Base(exifPath), filepath.Base(exifPath))
-		exifData.add(tagsToLoad, 0, "Sys/Len", exif.TypeLong, fmt.Sprintf("%d", finfo.Size()), uint64(finfo.Size()))
-		exifData.add(tagsToLoad, 0, "Sys/Path", exif.TypeAscii, exifPath, exifPath)
-		exifData.add(tagsToLoad, 0, "Sys/Tz", exif.TypeAscii, loc.String(), loc.String())
+		exifData.add(tagsToLoad, 0, "Sys/Name", exif.TypeAscii, filepath.Base(exifPath), filepath.Base(exifPath), false)
+		exifData.add(tagsToLoad, 0, "Sys/Len", exif.TypeLong, fmt.Sprintf("%d", finfo.Size()), uint64(finfo.Size()), false)
+		exifData.add(tagsToLoad, 0, "Sys/Path", exif.TypeAscii, exifPath, exifPath, false)
+		exifData.add(tagsToLoad, 0, "Sys/Tz", exif.TypeAscii, loc.String(), loc.String(), false)
 		tv := finfo.ModTime()
-		exifData.add(tagsToLoad, 0, "Sys/Mod", exif.TypeAscii, tv.String(), tv)
+		exifData.add(tagsToLoad, 0, "Sys/Mod", exif.TypeAscii, tv.String(), tv, false)
 
 		// Insert unique key
 		uniqueKey := exifData.Get("ImageUniqueID")
@@ -240,7 +222,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		} else {
 			uniqueKey = strings.TrimRight(uniqueKey, "0")
 		}
-		exifData.add(tagsToLoad, 0, "Sys/Key", exif.TypeAscii, uniqueKey, uniqueKey)
+		exifData.add(tagsToLoad, 0, "Sys/Key", exif.TypeAscii, uniqueKey, uniqueKey, false)
 	}
 	return &exifData, err
 }

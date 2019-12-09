@@ -11,10 +11,9 @@ import (
 	"flag"
 	"log"
 	"os"
-	"runtime"
 	"runtime/debug"
 
-	exiftool "github.com/cxcheng/exifutil/exiftool"
+	"github.com/cxcheng/exifutil/exiftool"
 )
 
 func main() {
@@ -28,24 +27,14 @@ func main() {
 	// Read configuration if specified or default
 	var confPath string
 	flag.StringVar(&confPath, "conf", "exif.yml", "Path of optional config YAML")
-	conf := exiftool.MakeConfig(confPath)
 
-	// Setup verbose param
-	if !conf.Verbose {
-		flag.BoolVar(&conf.Verbose, "verbose", false, "Verbose output, overrides config")
+	// Initialize and run pipeline components
+	var pipeline *exiftool.Pipeline
+	var err error
+	if pipeline, err = exiftool.MakePipeline(confPath); err != nil {
+		log.Printf("Error creating pipeline: %s", err)
+		os.Exit(2)
 	}
-	if conf.Verbose {
-		log.Printf("Number of CPUs: %d", runtime.NumCPU())
-	}
-
-	// Run command
-	ctx := exiftool.InputCtx{}
-	if err := ctx.Init(conf); err != nil {
-		log.Printf("Error initiializing: %s", err)
-		os.Exit(1)
-	}
-	ctx.Run()
-
-	// Exit
+	pipeline.Run()
 	os.Exit(0)
 }
