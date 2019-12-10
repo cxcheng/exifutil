@@ -5,32 +5,26 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/cxcheng/exifutil"
 )
 
-type InputContext struct {
-	Out chan *exifutil.ExifData
-
-	conf       *Config
-	callOnExit func(time.Time, string)
-	tz         *time.Location
+type ExifInput struct {
+	conf *Config
+	out  *PipelineChan
+	tz   *time.Location
 }
 
-func MakeInput(conf *Config, callOnExit func(time.Time, string)) (*InputContext, error) {
-	defer callOnExit(time.Now(), "Init Input")
-
-	var ctx InputContext
+func MakeInput(conf *Config) (*PipelineComponent, error) {
+	var ctx ExifInput
 	var err error
 
-	ctx = InputContext{conf: conf, callOnExit: callOnExit, Out: make(chan *exifutil.ExifData)}
+	ctx = ExifInput{conf: conf, out: new(PipelineChan)}
 
 	// Process command-line arguments
 	var filterExt bool
 	flag.BoolVar(&filterExt, "filterext", true, "Filter files by extension")
-	flag.Parse()
 	if !filterExt {
 		ctx.conf.Input.FileExts = make([]string, 0) // no file extensions to filter
 	}
@@ -49,8 +43,18 @@ func MakeInput(conf *Config, callOnExit func(time.Time, string)) (*InputContext,
 	return &ctx, err
 }
 
-func (ctx *InputContext) ReadInputs(wg *sync.WaitGroup) {
-	defer ctx.callOnExit(time.Now(), "Read Inputs")
+func (ctx *ExifInput) SetInput(in *PipelineChan) {
+	if in != nil {
+		log.Fatalf("Cannot set input to starting component")
+	}
+}
+
+func (ctx *ExifInput) GetOutput() *PipelineChan {
+	return ctx.out
+}
+
+func (ctx *ExifInput) Run(callOnExit func(time.Time, string)) {
+	defer callOnExit(time.Now(), "Read Inputs")
 
 	// Walkthrough arguments
 	numFiles := 0
@@ -79,7 +83,7 @@ func (ctx *InputContext) ReadInputs(wg *sync.WaitGroup) {
 					}
 					// Execute goroutine to process
 					numFiles++
-					go ctx.processInput(path)
+					go ctx.processInput(callOnExit, path)
 				}
 				return nil // ignore errors
 			})
@@ -113,22 +117,21 @@ func (ctx *InputContext) ReadInputs(wg *sync.WaitGroup) {
 	}
 
 	// Signal finish
-	ctx.Out <- nil
-	wg.Done()
+	*ctx.out <- nil
 }
 
-func (ctx *InputContext) processInput(path string) {
-	defer ctx.callOnExit(time.Now(), "Process "+path)
+func (ctx *ExifInput) processInput(callOnExit func(time.Time, string), path string) {
+	defer callOnExit(time.Now(), "Process "+path)
 
 	exifData, err := exifutil.ReadExifData(path, ctx.tz, ctx.conf.Input.Trim, ctx.conf.Input.TagsToLoad)
 	if err != nil {
 		log.Printf("Error processing [%s]: %s\n", path, err)
 		if ctx.conf.ExitOnError {
 			// Output nil to stop
-			ctx.Out <- nil
+			*ctx.out <- nil
 
 		}
 	} else {
-		ctx.Out <- exifData
+		*ctx.out <- exifData
 	}
 }
