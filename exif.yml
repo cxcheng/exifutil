@@ -1,4 +1,5 @@
 log_path: exif.log
+pipeline: ["input", "database", "output"]
 input:
   exit_on_error: false
   file_exts: [] # empty => read all files
@@ -6,6 +7,9 @@ input:
   timezone: Asia/Singapore
   trim: true # trim leading and trailing spaces
 database:
-  name: exif
+  name: metadata
   uri: "mongodb://localhost:27017"
+  drop_first: true
+output:
+  path: "exif.csv"
 verbose: true

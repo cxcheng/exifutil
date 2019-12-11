@@ -3,13 +3,11 @@ package exiftool
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-
-	"github.com/cxcheng/exifutil"
 )
 
 type outRecord struct {
@@ -18,76 +16,97 @@ type outRecord struct {
 	colVs []interface{}
 }
 
-type DBConfig struct {
-	Name string `yaml:"name"`
-	URI  string `yaml:"uri"`
-}
-
-type DBContext struct {
-	Out chan *exifutil.ExifData
-
-	conf       *Config
-	in         chan *exifutil.ExifData
-	callOnExit func(time.Time, string)
-	verbose    bool
+type ExifDB struct {
+	config *Config
+	in     PipelineChan
+	out    PipelineChan
 
 	client     *mongo.Client
+	mongoCtx   context.Context
 	collection *mongo.Collection
 }
 
-func MakeDB(conf *Config, callOnExit func(time.Time, string), in chan *exifutil.ExifData) (*DBContext, error) {
-	defer callOnExit(time.Now(), "Init DB")
+func (ctx *ExifDB) AddArgs() {
+}
 
-	var ctx DBContext
+func (ctx *ExifDB) Init(config *Config) error {
 	var err error
 
-	ctx = DBContext{conf: conf, callOnExit: callOnExit, in: in, Out: make(chan *exifutil.ExifData)}
-
-	// Process command-line arguments
-	/*
-		var cols, outPath, sortCol string
-		flag.StringVar(&cols, "cols", "Sys/Name,Sys/Key,Make,Model,DateTimeOriginal", "Columns to output")
-		flag.StringVar(&outPath, "out", "", "Output path")
-		flag.StringVar(&cmd.outType, "type", "", "Output type: csv, json, keys")
-		flag.BoolVar(&cmd.value, "value", false, "Output value instead of original text")
-		flag.Parse()
-	*/
+	ctx.config = config
+	ctx.out = make(PipelineChan)
 
 	// Setup config
-	dbName := ctx.conf.DB.Name
+	dbName := config.DB.Name
 	if dbName == "" {
 		dbName = "exif_data"
-		ctx.conf.DB.Name = dbName
+		ctx.config.DB.Name = dbName
 	}
 
 	// Setup client
 	var uri string
-	if ctx.conf.DB.URI == "" {
+	if config.DB.URI == "" {
 		uri = "mongodb://localhost:27017"
-		ctx.conf.DB.URI = uri
+		ctx.config.DB.URI = uri
 	} else {
-		uri = ctx.conf.DB.URI
+		uri = config.DB.URI
 	}
 	log.Printf("Connecting to MongoDB [%v/%v]", uri, dbName)
 
-	mongoCtx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	if ctx.client, err = mongo.Connect(mongoCtx, options.Client().ApplyURI(uri)); err == nil {
-		ctx.collection = ctx.client.Database(dbName).Collection("exif")
+	ctx.mongoCtx, _ = context.WithTimeout(context.Background(), 10*time.Second)
+	if ctx.client, err = mongo.Connect(ctx.mongoCtx, options.Client().ApplyURI(uri)); err == nil {
+		ctx.collection = ctx.client.Database(dbName).Collection("metadata")
+		// Recreate collection from scratch
+		if config.DB.DropFirst {
+			log.Printf("Dropping collection metadata first")
+			if err = ctx.collection.Drop(ctx.mongoCtx); err != nil {
+				return err
+			}
+			// Recreate
+			ctx.collection = ctx.client.Database(dbName).Collection("metadata")
+		}
 	}
 
-	return &ctx, err
+	return err
 }
 
-func (ctx *DBContext) StoreMetadata(wg *sync.WaitGroup) {
-	defer ctx.callOnExit(time.Now(), "Store DB")
+func (ctx *ExifDB) SetInput(in PipelineChan) {
+	ctx.in = in
+}
+
+func (ctx *ExifDB) GetOutput() PipelineChan {
+	return ctx.out
+}
+
+func (ctx *ExifDB) Run(callOnExit func(time.Time, string)) {
+	defer callOnExit(time.Now(), "Store Metadata")
 
 	for {
 		exifData := <-ctx.in
 		if exifData == nil {
 			// No more inputs, exit
-			ctx.Out <- nil
 			break
 		}
+
+		// Forward to next stage before DB work
+		ctx.out <- exifData
+
+		var err error
+
+		// Insert database record
+		var bdoc interface{}
+		if err = bson.UnmarshalExtJSON([]byte(exifData.Json()), false, bdoc); err != nil {
+			log.Printf("[%s] parse error: %s", exifData.Get("Sys/Path"), err)
+			println(exifData.Json())
+			// skip to next
+			continue
+		}
+		var rs *mongo.InsertOneResult
+		if rs, err = ctx.collection.InsertOne(ctx.mongoCtx, &bdoc); err != nil {
+			log.Printf("[%s] insert error: %s", exifData.Get("Sys/Path"), err)
+			continue
+		}
+		log.Printf("[%s] inserted record %v", rs.InsertedID)
 	}
-	wg.Done()
+	// Signal exit
+	ctx.out <- nil
 }

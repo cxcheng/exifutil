@@ -14,10 +14,10 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cxcheng/exifutil/exiftool"
-	"gopkg.in/yaml.v2"
 )
 
 func logElapsedTime(start time.Time, label string) {
@@ -25,7 +25,7 @@ func logElapsedTime(start time.Time, label string) {
 	runtime.Callers(2, pc)
 	f := runtime.FuncForPC(pc[0])
 	//file, line := f.FileLine(pc[0])
-	log.Printf("**** [%s:%s] elapsed time: %s, %d goroutines", label, f.Name(), time.Since(start), runtime.NumGoroutine())
+	log.Printf("**** [%s]:[%s] elapsed time: %s, %d goroutines", label, f.Name(), time.Since(start), runtime.NumGoroutine())
 }
 
 func main() {
@@ -41,13 +41,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [<flags>] <descriptor.yml> [<input-files>]\n", os.Args[0])
 		os.Exit(1)
 	}
-	config := new(exiftool.Config)
-	if f, err := os.Open(os.Args[1]); err == nil {
-		decoder := yaml.NewDecoder(f)
-		if err = decoder.Decode(config); err != nil {
-			log.Panicf("Error reading pipeline config [%s], exiting...", p.confPath)
+
+	// Find first argument that's not a flag and use it as path to config file
+	firstNonFlagIdx := 1
+	for firstNonFlagIdx < len(os.Args) {
+		if !strings.HasPrefix(os.Args[firstNonFlagIdx], "-") {
+			break
 		}
-		defer f.Close() // close immediately after exiting this
+		firstNonFlagIdx++
+	}
+	if firstNonFlagIdx >= len(os.Args) {
+		fmt.Fprintf(os.Stderr, "Usage: %1 [<flags>] <pipeline.yml> <inputs>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	config, err := exiftool.MakeConfig(os.Args[firstNonFlagIdx])
+	if err != nil {
+		log.Printf("%s", err)
+		os.Exit(1)
 	}
 
 	// Setup log path
@@ -62,13 +73,15 @@ func main() {
 	}
 
 	// Construct and initialize pipeline arguments
-	if pipeline, err := MakePipeline(config); err != nil {
+	pipeline := exiftool.Pipeline{}
+	pipeline.AddArgs()
+	if err := pipeline.Init(config); err != nil {
 		log.Printf("%s", err)
 		os.Exit(2)
 	}
+	flag.Parse()
 
 	// Run pipeline after initializing command-line flags
-	flag.Parse()
 	pipeline.Run(logElapsedTime)
 	os.Exit(0)
 }

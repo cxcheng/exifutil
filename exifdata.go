@@ -2,6 +2,7 @@ package exifutil
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -147,7 +148,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		}
 		var it *exif.IndexedTag
 		if it, err = ti.Get(ifdPath, tagId); err != nil {
-			log.Printf("Skipping missing tagId [%s]: [%s:0x%04x]\n", exifPath, ifdPath, tagId)
+			log.Printf("[%s] Skipping missing tag [%s]: 0x%04x", exifPath, ifdPath, tagId)
 			return nil // TO DO: should not be the case, but we need to ignore it
 		}
 
@@ -167,17 +168,31 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 		}
 
 		// Compute the values
-		s, err1 := tagType.ResolveAsString(valueContext, true)
-		v, err2 := tagType.Resolve(valueContext)
-		if err1 != nil || err2 != nil {
-			log.Printf("Tag [%s] parsing error: %s %s", err1, err2)
+		if tagType.Type() != exif.TypeUndefined {
+			s, err1 := tagType.ResolveAsString(valueContext, true)
+			v, err2 := tagType.Resolve(valueContext)
+			if err1 != nil {
+				log.Printf("[%s] tag [%s] parsing error: %s", exifPath, tagPath, err1)
+			} else if err2 != nil {
+				log.Printf("[%s] tag [%s] parsing error: %s", exifPath, tagPath, err2)
+			} else {
+				if trim {
+					s = strings.TrimSpace(s)
+				}
+
+				// Skip tag if it is not on the specified list; filter out empty tags
+				exifData.add(tagsToLoad, tagId, tagPath, tagType.Type(), s, v, trim)
+			}
 		} else {
-			if trim {
-				s = strings.TrimSpace(s)
+			var s string
+			if len(valueContext.AddressableData) > 16 {
+
+				s = hex.Dump(valueContext.AddressableData[:16])
+			} else {
+				s = hex.Dump(valueContext.AddressableData)
 			}
 
-			// Skip tag if it is not on the specified list; filter out empty tags
-			exifData.add(tagsToLoad, tagId, tagPath, tagType.Type(), s, v, trim)
+			log.Printf("[%s] Skipping [%s] undefined type: %d\n    %v", exifPath, tagPath, valueContext.UnitCount, s)
 
 		}
 
@@ -195,7 +210,7 @@ func MakeExifData(exifPath string, finfo os.FileInfo, data []byte, loc *time.Loc
 					if s, ok := subsecV.(string); ok {
 						var f float64
 						if _, err := fmt.Sscanf("0."+s, "%f", &f); err == nil {
-							subsecNano = int(f * 10000000000)
+							subsecNano = int(f * 1000000000)
 						}
 						exifData.values[subSecTagName] = subsecNano
 					}
