@@ -6,64 +6,68 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
 type ExifOutput struct {
-	config *Config
-	in     PipelineChan
+	in  PipelineChan
+	out PipelineChan
 
-	colsArg   string
-	outType   string
-	useValues bool
+	colsArg    string
+	outPath    string
+	outPathArg string
+	outType    string
+	tagsToLoad []string
+	useValues  bool
 }
 
-func (ctx *ExifOutput) AddArgs() {
-	// Add command-line args
-	flag.StringVar(&ctx.colsArg, "cols", "", "Columns to output")
-	flag.StringVar(&ctx.outType, "type", "", "Output type: csv, json, keys")
-	flag.BoolVar(&ctx.useValues, "values", false, "Output value instead of original text")
-
-}
-
-func (ctx *ExifOutput) Init(config *Config) error {
-	ctx.config = config
+func (c *ExifOutput) Init(config *Config) error {
+	c.tagsToLoad = config.Input.TagsToLoad
 
 	// Setup output type
-	if ctx.outType == "" {
-		ctx.outType = "csv"
+	if c.outType == "" {
+		c.outType = "csv"
 	}
 
+	// Add command-line args
+	flag.StringVar(&c.colsArg, "cols", "", "Columns to output")
+	flag.StringVar(&c.outPathArg, "out", "", "Output pathname")
+	flag.StringVar(&c.outType, "type", "csv", "Output type: csv, json, keys")
+	flag.BoolVar(&c.useValues, "values", false, "Output value instead of original text")
+
 	return nil
 }
 
-func (ctx *ExifOutput) SetInput(in PipelineChan) {
-	ctx.in = in
+func (c *ExifOutput) SetInput(in PipelineChan) {
+	c.in = in
 }
 
-func (ctx *ExifOutput) GetOutput() PipelineChan {
-	return nil
+func (c *ExifOutput) SetOutput(out PipelineChan) {
+	c.out = out
 }
 
-func (ctx *ExifOutput) Run(callOnExit func(time.Time, string)) {
-	defer callOnExit(time.Now(), "Output")
-
+func (c *ExifOutput) Run() error {
 	// Setup default output columns
 	var cols []string
-	if ctx.colsArg == "" {
-		if len(ctx.config.Input.TagsToLoad) > 0 {
-			cols = ctx.config.Input.TagsToLoad
+	if c.colsArg == "" {
+		if len(c.tagsToLoad) > 0 {
+			cols = c.tagsToLoad
 		} else {
 			cols = []string{"Sys/Name", "Sys/Key", "Make", "Model", "DateTimeOriginal"}
 		}
 	} else {
-		cols = strings.Split(ctx.colsArg, ",")
+		cols = strings.Split(c.colsArg, ",")
 	}
 
 	// Setup output file
+	var outPath string
 	var w *os.File
 	var err error
-	if w, err = os.Create(ctx.config.Output.Path); err != nil {
+	if c.outPathArg != "" {
+		outPath = c.outPathArg
+	} else {
+		outPath = c.outPath
+	}
+	if w, err = os.Create(outPath); err != nil {
 		// Substitute with Stdout
 		w = os.Stdout
 	}
@@ -71,7 +75,7 @@ func (ctx *ExifOutput) Run(callOnExit func(time.Time, string)) {
 
 	// Setup for CSV if specified, or multi-cols
 	var csvW *csv.Writer
-	if ctx.outType == "csv" {
+	if c.outType == "csv" {
 		csvW = csv.NewWriter(w)
 
 		// Output headers
@@ -80,15 +84,19 @@ func (ctx *ExifOutput) Run(callOnExit func(time.Time, string)) {
 
 	// Process incoming records
 	for {
-		exifData := <-ctx.in
+		exifData := <-c.in
+		if c.out != nil {
+			// forward to next stage if there is one
+			c.out <- exifData
+		}
 		if exifData == nil {
 			// No more inputs, exit
 			break
 		}
-		switch ctx.outType {
+		switch c.outType {
 		case "csv":
 			outCols := make([]string, len(cols))
-			if ctx.useValues {
+			if c.useValues {
 				for i, col := range cols {
 					var v interface{}
 					_, v = exifData.Expr(col)
@@ -112,4 +120,6 @@ func (ctx *ExifOutput) Run(callOnExit func(time.Time, string)) {
 			}
 		}
 	}
+
+	return nil
 }

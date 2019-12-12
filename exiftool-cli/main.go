@@ -36,6 +36,10 @@ func main() {
 		}
 	}()
 
+	var config *exiftool.Config
+	var pipeline *exiftool.Pipeline
+	var err error
+
 	// Read and process descriptor file
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s [<flags>] <descriptor.yml> [<input-files>]\n", os.Args[0])
@@ -55,7 +59,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	config, err := exiftool.MakeConfig(os.Args[firstNonFlagIdx])
+	config, err = exiftool.MakeConfig(os.Args[firstNonFlagIdx])
 	if err != nil {
 		log.Printf("%s", err)
 		os.Exit(1)
@@ -73,15 +77,17 @@ func main() {
 	}
 
 	// Construct and initialize pipeline arguments
-	pipeline := exiftool.Pipeline{}
-	pipeline.AddArgs()
-	if err := pipeline.Init(config); err != nil {
+	if pipeline, err = exiftool.MakePipeline(config); err != nil {
 		log.Printf("%s", err)
 		os.Exit(2)
 	}
-	flag.Parse()
 
 	// Run pipeline after initializing command-line flags
-	pipeline.Run(logElapsedTime)
-	os.Exit(0)
+	flag.Parse()
+	if err := pipeline.Run(); err != nil {
+		log.Printf("Pipeline error: %s", err)
+		os.Exit(2)
+	} else {
+		os.Exit(0)
+	}
 }
