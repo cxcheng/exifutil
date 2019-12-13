@@ -80,23 +80,23 @@ func (c *ExifDB) Run() error {
 		}
 
 		var err error
+		path := exifData.Get("Sys/Path")
 
 		// Forward to next stage
 
 		// Insert database record
-		var bdoc interface{}
-		if err = bson.UnmarshalExtJSON([]byte(exifData.Json()), false, bdoc); err != nil {
+		var bdoc map[string]string
+		if err = bson.UnmarshalExtJSON([]byte(exifData.Json()), true, &bdoc); err != nil {
 			log.Printf("[%s] parse error: %s", exifData.Get("Sys/Path"), err)
-			println(exifData.Json())
 			// skip to next
 			continue
 		}
 		var rs *mongo.InsertOneResult
 		if rs, err = c.collection.InsertOne(c.ctx, &bdoc); err != nil {
-			log.Printf("[%s] insert error: %s", exifData.Get("Sys/Path"), err)
+			log.Printf("[%s] insert error: %s", path, err)
 			continue
 		}
-		log.Printf("[%s] inserted record %v", rs.InsertedID)
+		log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
 
 	}
 	return nil
