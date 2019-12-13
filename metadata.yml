@@ -1,0 +1,23 @@
+map:
+  ApertureValue: "Aperture"
+  ExposureTime: "ShutterSpeed"
+  FocalLengthIn35mmFormat: "FocalLength35efl"
+  InternalSerialNumber: "SerialNumber"
+  MaxApertureValue: "MaxAperture"
+  MinApertureValue: "MinAperture"
+  ShutterSpeedValue: "ShutterSpeed"
+  # Empty => do not return
+  ExifToolVersion:
+  OffsetTimeDigitized:
+  SonyISO:
+  SonyImageHeight:
+  SonyImageHeightMax:
+  SonyImageWidth:
+  SonyImageWidthMax:
+  SubSecTime:
+  SubSecTimeDigitized:
+  SubSecTimeOriginal:
+
+subsec_date:
+  SubSecDateTimeOriginal: "DateTimeOriginal"
+  SubSecModifyDate: "ModifyDate"
