@@ -11,7 +11,7 @@ input:
 database:
   name: metadata
   uri: "mongodb://localhost:27017"
-  drop_first: true
+  drop_first: false
 output:
   path: metadata.csv
 verbose: true

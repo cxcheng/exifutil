@@ -2,8 +2,10 @@ package exifutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
+	"reflect"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -83,19 +85,31 @@ func (c *ExifDB) Run() error {
 		for _, md := range o.data {
 			path := md.Expr("FileName")
 
-			// Insert database record
-			var bdoc map[string]string
-			if err = bson.UnmarshalExtJSON([]byte(md.Json()), true, &bdoc); err != nil {
-				log.Printf("[%v] parse error: %s", path, err)
-				// skip to next
-				continue
+			// Check if there is existing record
+			findRs := c.collection.FindOne(c.ctx, bson.M{"Key": md.Expr("Key")})
+			var findRsV interface{}
+			if err = findRs.Decode(&findRsV); err == nil {
+				// Update existing record
+				/*
+					var rs *mongo.UpdateResult
+					if rs, err = c.collection.UpdateOne(c.ctx, bson.M{"_id": findRsV["_id"]}, md.V); err != nil {
+						log.Printf("[%s] insert error: %s", path, err)
+						continue
+					}
+				*/
+				s, err := json.Marshal(findRsV)
+				print(err)
+				log.Printf("[%s] updated record [%s] %s %s", path, reflect.TypeOf(findRsV), s)
+			} else {
+				// Insert database record
+				var rs *mongo.InsertOneResult
+				if rs, err = c.collection.InsertOne(c.ctx, md.V); err != nil {
+					log.Printf("[%s] insert error: %s", path, err)
+					continue
+				}
+				log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
 			}
-			var rs *mongo.InsertOneResult
-			if rs, err = c.collection.InsertOne(c.ctx, &bdoc); err != nil {
-				log.Printf("[%s] insert error: %s", path, err)
-				continue
-			}
-			log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
+
 		}
 	}
 	return nil
