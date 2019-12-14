@@ -2,10 +2,8 @@ package exifutil
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
-	"reflect"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -13,7 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type ExifDB struct {
+type MetadataDB struct {
 	in  PipelineChan
 	out PipelineChan
 
@@ -22,7 +20,7 @@ type ExifDB struct {
 	collection *mongo.Collection
 }
 
-func (c *ExifDB) Init(config *Config) error {
+func (c *MetadataDB) Init(config *Config) error {
 	var err error
 
 	// Setup config
@@ -57,15 +55,15 @@ func (c *ExifDB) Init(config *Config) error {
 	return err
 }
 
-func (c *ExifDB) SetInput(in PipelineChan) {
+func (c *MetadataDB) SetInput(in PipelineChan) {
 	c.in = in
 }
 
-func (c *ExifDB) SetOutput(out PipelineChan) {
+func (c *MetadataDB) SetOutput(out PipelineChan) {
 	c.out = out
 }
 
-func (c *ExifDB) Run() error {
+func (c *MetadataDB) Run() error {
 	if c.in == nil {
 		return errors.New("No input defined")
 	}
@@ -81,33 +79,29 @@ func (c *ExifDB) Run() error {
 			break
 		}
 
-		var err error
 		for _, md := range o.data {
 			path := md.Expr("FileName")
 
 			// Check if there is existing record
-			findRs := c.collection.FindOne(c.ctx, bson.M{"Key": md.Expr("Key")})
+			id := md.ConstructKey()
+			findRs := c.collection.FindOne(c.ctx, bson.M{"_id": id})
 			var findRsV interface{}
-			if err = findRs.Decode(&findRsV); err == nil {
+			if err := findRs.Decode(&findRsV); err == nil {
 				// Update existing record
-				/*
-					var rs *mongo.UpdateResult
-					if rs, err = c.collection.UpdateOne(c.ctx, bson.M{"_id": findRsV["_id"]}, md.V); err != nil {
-						log.Printf("[%s] insert error: %s", path, err)
-						continue
-					}
-				*/
-				s, err := json.Marshal(findRsV)
-				print(err)
-				log.Printf("[%s] updated record [%s] %s %s", path, reflect.TypeOf(findRsV), s)
+				if _, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V); err != nil {
+					log.Printf("[%s] replace error: %s", path, err)
+					continue
+				}
+				log.Printf("[%s] updated record [%v]", path, id)
 			} else {
 				// Insert database record
-				var rs *mongo.InsertOneResult
-				if rs, err = c.collection.InsertOne(c.ctx, md.V); err != nil {
+				md.V["_id"] = id
+				rs, err := c.collection.InsertOne(c.ctx, md.V)
+				if err != nil {
 					log.Printf("[%s] insert error: %s", path, err)
 					continue
 				}
-				log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
+				log.Printf("[%s] inserted record [%v] %s", path, rs.InsertedID, id)
 			}
 
 		}

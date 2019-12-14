@@ -3,22 +3,26 @@ package exifutil
 import (
 	"encoding/csv"
 	"os"
-	"strings"
 )
 
 type MetadataOutput struct {
 	in  PipelineChan
 	out PipelineChan
 
-	colsArg    string
-	outPath    string
-	outPathArg string
+	cols       []string
+	path       string
 	outType    string
 	tagsToLoad []string
 }
 
 func (c *MetadataOutput) Init(config *Config) error {
+	c.cols = config.Output.Cols
 	c.tagsToLoad = config.Input.TagsToLoad
+
+	// Setup default output columns
+	if len(c.cols) == 0 {
+		c.cols = []string{"FileName"}
+	}
 
 	// Setup output type
 	if c.outType == "" {
@@ -37,28 +41,10 @@ func (c *MetadataOutput) SetOutput(out PipelineChan) {
 }
 
 func (c *MetadataOutput) Run() error {
-	// Setup default output columns
-	var cols []string
-	if c.colsArg == "" {
-		if len(c.tagsToLoad) > 0 {
-			cols = c.tagsToLoad
-		} else {
-			cols = []string{"FileName", "Key", "Make", "Model", "DateTimeOriginal"}
-		}
-	} else {
-		cols = strings.Split(c.colsArg, ",")
-	}
-
 	// Setup output file
-	var outPath string
 	var w *os.File
 	var err error
-	if c.outPathArg != "" {
-		outPath = c.outPathArg
-	} else {
-		outPath = c.outPath
-	}
-	if w, err = os.Create(outPath); err != nil {
+	if w, err = os.Create(c.path); err != nil {
 		// Substitute with Stdout
 		w = os.Stdout
 	}
@@ -70,7 +56,7 @@ func (c *MetadataOutput) Run() error {
 		csvW = csv.NewWriter(w)
 
 		// Output headers
-		csvW.Write(cols)
+		csvW.Write(c.cols)
 	}
 
 	// Process incoming records
@@ -87,8 +73,8 @@ func (c *MetadataOutput) Run() error {
 		for _, md := range o.data {
 			switch c.outType {
 			case "csv":
-				outCols := make([]string, len(cols))
-				for i, col := range cols {
+				outCols := make([]string, len(c.cols))
+				for i, col := range c.cols {
 					outCols[i] = md.ExprString(col)
 				}
 				csvW.Write(outCols)

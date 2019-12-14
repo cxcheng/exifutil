@@ -13,5 +13,7 @@ database:
   uri: "mongodb://localhost:27017"
   drop_first: false
 output:
+  cols: ["FileName", "Make", "Model", "DateTimeOriginal"]
   path: metadata.csv
+  type: csv
 verbose: true

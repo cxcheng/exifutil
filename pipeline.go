@@ -94,7 +94,7 @@ var PipelineArgs map[string]interface{}
 var PipelineComponentRegistry = map[string]reflect.Type{
 	"input":    reflect.TypeOf(MetadataInput{}),
 	"output":   reflect.TypeOf(MetadataOutput{}),
-	"database": reflect.TypeOf(ExifDB{}),
+	"database": reflect.TypeOf(MetadataDB{}),
 }
 
 func MakePipelineComponent(name string) (PipelineComponent, error) {
