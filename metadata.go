@@ -81,20 +81,6 @@ func parseDate(s string, tz *time.Location) interface{} {
 	}
 }
 
-func computeUniqeKey(s string) string {
-	const (
-		p uint64 = 31
-		m uint64 = 4710343600320809
-	)
-	var hash uint64 = 0
-	var pow uint64 = 1
-	for _, c := range s {
-		hash = (hash + (uint64(c)-'a'+1)*pow) % m
-		pow = (pow * p) % m
-	}
-	return fmt.Sprintf("%016x", hash)
-}
-
 func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToLoadMap map[string]bool) ([]Metadata, error) {
 	metas := r.et.ExtractMetadata(paths...)
 	results := make([]Metadata, 0, len(metas))
@@ -193,14 +179,32 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 			}
 		}
 
-		// Compute unique key hash
-		result.V["Key"] = computeUniqeKey(fmt.Sprintf("%s%s%s%s",
-			result.V["ImageUniqueID"], result.V["FileName"], result.V["SerialNumber"], result.V["DateTimeOriginal"]))
-
 		// Add to results
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+func (d *Metadata) ConstructKey() string {
+	// Compute unique key hash
+	ts, found := d.V["DateTimeOriginal"]
+	if !found {
+		ts = time.Time{}
+	}
+	key := fmt.Sprintf("%s%s%s%s",
+		d.V["ImageUniqueID"], d.V["FileName"], d.V["SerialNumber"], ts)
+
+	const (
+		p uint64 = 31
+		m uint64 = 4710343600320809
+	)
+	var hash uint64 = 0
+	var pow uint64 = 1
+	for _, c := range key {
+		hash = (hash + (uint64(c)-'a'+1)*pow) % m
+		pow = (pow * p) % m
+	}
+	return fmt.Sprintf("%016x", hash)
 }
 
 func (d *Metadata) Expr(expr string) interface{} {
