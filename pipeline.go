@@ -93,7 +93,7 @@ var PipelineArgs map[string]interface{}
 
 var PipelineComponentRegistry = map[string]reflect.Type{
 	"input":    reflect.TypeOf(MetadataInput{}),
-	"output":   reflect.TypeOf(ExifOutput{}),
+	"output":   reflect.TypeOf(MetadataOutput{}),
 	"database": reflect.TypeOf(ExifDB{}),
 }
 

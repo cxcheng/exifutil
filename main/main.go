@@ -35,8 +35,8 @@ func main() {
 	// Process input arguments
 	pipelineArgs := exifutil.AddArgs()
 	flag.Parse()
-	if len(flag.Args() < 1) {
-		fmt.Fprintf(os.stderr, "Usage: %s [<config>] <pipeline> [<args>]\n", os.Args[0])
+	if len(flag.Args()) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: %s [<config>] <pipeline> [<args>]\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -58,7 +58,7 @@ func main() {
 	}
 
 	// Construct and initialize pipeline arguments
-	if pipeline, err = exifutil.MakePipeline(config); err != nil {
+	if pipeline, err = exifutil.MakePipeline(config, flag.Args()[0]); err != nil {
 		log.Printf("%s", err)
 		os.Exit(2)
 	}

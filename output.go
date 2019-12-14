@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-type ExifOutput struct {
+type MetadataOutput struct {
 	in  PipelineChan
 	out PipelineChan
 
@@ -17,7 +17,7 @@ type ExifOutput struct {
 	tagsToLoad []string
 }
 
-func (c *ExifOutput) Init(config *Config) error {
+func (c *MetadataOutput) Init(config *Config) error {
 	c.tagsToLoad = config.Input.TagsToLoad
 
 	// Setup output type
@@ -28,22 +28,22 @@ func (c *ExifOutput) Init(config *Config) error {
 	return nil
 }
 
-func (c *ExifOutput) SetInput(in PipelineChan) {
+func (c *MetadataOutput) SetInput(in PipelineChan) {
 	c.in = in
 }
 
-func (c *ExifOutput) SetOutput(out PipelineChan) {
+func (c *MetadataOutput) SetOutput(out PipelineChan) {
 	c.out = out
 }
 
-func (c *ExifOutput) Run() error {
+func (c *MetadataOutput) Run() error {
 	// Setup default output columns
 	var cols []string
 	if c.colsArg == "" {
 		if len(c.tagsToLoad) > 0 {
 			cols = c.tagsToLoad
 		} else {
-			cols = []string{"Sys/Name", "Sys/Key", "Make", "Model", "DateTimeOriginal"}
+			cols = []string{"FileName", "Key", "Make", "Model", "DateTimeOriginal"}
 		}
 	} else {
 		cols = strings.Split(c.colsArg, ",")

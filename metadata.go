@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -183,7 +182,7 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 				v = fmt.Sprintf("%v", v)
 			}
 
-			fmt.Printf("%s[%v] %v    - %s\n", meta.File, k, v, reflect.TypeOf(v))
+			//fmt.Printf("%s[%v] %v    - %s\n", meta.File, k, v, reflect.TypeOf(v))
 			result.V[k] = v
 		}
 
@@ -208,7 +207,6 @@ func (d *Metadata) Expr(expr string) interface{} {
 	// If it starts and end with a "@", it is an expression
 	// If it starts with a "%", it is a template
 	// Otherwise, it is a column
-	var result interface{}
 	if len(expr) > 0 {
 		if expr[0] == '@' {
 			return d.Eval(expr[1:])
@@ -237,6 +235,8 @@ func (d *Metadata) Expr(expr string) interface{} {
 			// Get tag value directly
 			if result, found := d.V[expr]; found {
 				return result
+			} else {
+				return expr
 			}
 		}
 	}
@@ -249,7 +249,6 @@ func (d *Metadata) Eval(expr string) interface{} {
 	if len(expr) > 0 {
 		var eval *govaluate.EvaluableExpression
 		if eval, err = govaluate.NewEvaluableExpression(expr); err == nil {
-			var rs interface{}
 			if result, err = eval.Evaluate(d.V); err != nil {
 				log.Printf("Error evaluating [%s]: %v", expr, err)
 				result = ""

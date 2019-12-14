@@ -81,14 +81,12 @@ func (c *ExifDB) Run() error {
 
 		var err error
 		for _, md := range o.data {
-			path := md.Expr("File Name")
-
-			// Forward to next stage
+			path := md.Expr("FileName")
 
 			// Insert database record
 			var bdoc map[string]string
 			if err = bson.UnmarshalExtJSON([]byte(md.Json()), true, &bdoc); err != nil {
-				log.Printf("[%s] parse error: %s", md.Expr("File Name"), err)
+				log.Printf("[%v] parse error: %s", path, err)
 				// skip to next
 				continue
 			}

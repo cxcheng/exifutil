@@ -1,4 +1,4 @@
-log_path: exif.log
+log_path: metadata.log
 pipeline:
   import: ["input", "database", "output"]
   query: ["query", "output"]
@@ -13,5 +13,5 @@ database:
   uri: "mongodb://localhost:27017"
   drop_first: true
 output:
-  path: "exif.csv"
+  path: metadata.csv
 verbose: true

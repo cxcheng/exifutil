@@ -78,8 +78,9 @@ func (c *MetadataInput) Run() error {
 	}
 
 	// Walkthrough arguments to construct path lists
-	pathLists := make([][]string, 0, len(c.readers))
-	filesToProcess := []string{}
+	pathLists := make([][]string, len(c.readers))
+	currentList := 0
+	numFiles := 0
 	for _, arg := range flag.Args()[1:] {
 		_ = filepath.Walk(arg,
 			func(path string, f os.FileInfo, err error) error {
@@ -100,30 +101,34 @@ func (c *MetadataInput) Run() error {
 					matchedExt = true
 				}
 				if matchedExt {
-					// If not filtered out, add to list to process
-					filesToProcess = append(filesToProcess, path)
+					// Rotate the list to add them to
+					pathLists[currentList] = append(pathLists[currentList], path)
+					currentList++
+					if currentList >= len(pathLists) {
+						currentList = 0
+					}
+					numFiles++
 				}
 				return nil // ignore errors
 			})
 	}
 
 	// Splits the load
-	numFiles := len(filesToProcess)
 	if numFiles > 0 {
 		// Execute goroutines to process
 		wg := sync.WaitGroup{}
-		wg.Add(numFiles)
+		wg.Add(len(c.readers))
 		numSuccesses := 0
-		for _, fileToProcess := range filesToProcess {
-			go func(path string) {
+		for i, pathsToProcess := range pathLists {
+			go func(r *MetadataReader, paths []string) {
 				start := time.Now()
-				success := c.processInput(path)
+				success := c.processInput(r, paths)
 				if success {
 					numSuccesses++
 				}
-				log.Printf("[%s] elapsed time: %s, success: %v", path, time.Since(start), success)
+				log.Printf("[%v] elapsed time: %s, success: %v", paths, time.Since(start), success)
 				wg.Done()
-			}(fileToProcess)
+			}(c.readers[i], pathsToProcess)
 		}
 		wg.Wait()
 		log.Printf("Finished input: [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numFiles-numSuccesses)
