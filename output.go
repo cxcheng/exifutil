@@ -2,7 +2,6 @@ package exifutil
 
 import (
 	"encoding/csv"
-	"fmt"
 	"os"
 	"strings"
 )
@@ -76,40 +75,28 @@ func (c *ExifOutput) Run() error {
 
 	// Process incoming records
 	for {
-		exifData := <-c.in
+		o := <-c.in
 		if c.out != nil {
 			// forward to next stage if there is one
-			c.out <- exifData
+			c.out <- o
 		}
-		if exifData == nil {
+		if o == nil || o.err != nil {
 			// No more inputs, exit
 			break
 		}
-		switch c.outType {
-		case "csv":
-			outCols := make([]string, len(cols))
-			if c.useValues {
+		for _, md := range o.data {
+			switch c.outType {
+			case "csv":
+				outCols := make([]string, len(cols))
 				for i, col := range cols {
-					var v interface{}
-					_, v = exifData.Expr(col)
-					outCols[i] = fmt.Sprintf("%v", v)
+					outCols[i] = md.ExprString(col)
 				}
+				csvW.Write(outCols)
+				csvW.Flush()
+			case "json":
+				w.WriteString(md.Json())
+			}
 
-			} else {
-				for i, col := range cols {
-					outCols[i], _ = exifData.Expr(col)
-				}
-			}
-			csvW.Write(outCols)
-			csvW.Flush()
-		case "detail":
-			w.WriteString(exifData.String())
-		case "json":
-			w.WriteString(exifData.Json())
-		case "keys":
-			for _, key := range exifData.Keys() {
-				w.WriteString(fmt.Sprintln(key))
-			}
 		}
 	}
 

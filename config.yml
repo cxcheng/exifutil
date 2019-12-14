@@ -5,6 +5,7 @@ pipeline:
 input:
   exit_on_error: false
   file_exts: [] # empty => read all files
+  meta_confg: "metadata.yml"
   tags_to_load: [] # empty => load all tags
   timezone: Asia/Singapore
 database:

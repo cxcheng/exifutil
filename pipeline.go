@@ -21,6 +21,7 @@ type Config struct {
 
 	Pipeline map[string][]string `yaml:"pipeline"`
 	Input    struct {
+		MetaConfig string   `yaml:"meta_config"`
 		FileExts   []string `yaml:"file_exts"`
 		TagsToLoad []string `yaml:"tags_to_load"`
 		Tz         string   `yaml:"timezone"`
@@ -41,12 +42,12 @@ type Config struct {
 	} `yaml:"throttle"`
 }
 
-type PipelingArgs struct {
+type Args struct {
 	ConfPath string
 }
 
-func AddArgs() *PipelineArgs {
-	args := new(PipelineArgs)
+func AddArgs() *Args {
+	args := new(Args)
 	flag.StringVar(&args.ConfPath, "conf", "config.yml", "Path to configuration file")
 	return args
 }
@@ -108,13 +109,17 @@ func MakePipelineComponent(name string) (PipelineComponent, error) {
 	}
 }
 
-func MakePipeline(config *Config) (*Pipeline, error) {
+func MakePipeline(config *Config, pipelineName string) (*Pipeline, error) {
 	var pipeline *Pipeline = new(Pipeline)
 	var err error
 
 	// Build pipeline from config
+	pipelineConfig, found := config.Pipeline[pipelineName]
+	if !found {
+		return nil, fmt.Errorf("Pipeline [%s] not defined", pipelineName)
+	}
 	lastStage := pipeline
-	for _, componentName := range config.Pipeline {
+	for _, componentName := range pipelineConfig {
 		var component PipelineComponent
 		if component, err = MakePipelineComponent(componentName); component == nil {
 			return nil, err

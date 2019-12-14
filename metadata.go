@@ -227,7 +227,7 @@ func (d *Metadata) Expr(expr string) interface{} {
 					}
 				case 1: // waiting for ']' to close, or end of expr
 					if c == ']' || i >= (len(expr2)-1) {
-						d.expandTag(rsBuf, expr2[pos:i])
+						rsBuf.WriteString(d.ExprString(expr2[pos:i]))
 						state = 0
 					}
 				}
@@ -264,5 +264,9 @@ func (d *Metadata) ExprString(expr string) string {
 }
 
 func (d *Metadata) Json() string {
-	return json.Marshal(d.V)
+	if b, err := json.Marshal(d.V); err != nil {
+		return ""
+	} else {
+		return string(b)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -16,6 +17,8 @@ type MetadataInput struct {
 	out           PipelineChan
 	tagsToLoadMap map[string]bool
 	tz            *time.Location
+
+	readers []*MetadataReader
 }
 
 func (c *MetadataInput) Init(config *Config) error {
@@ -38,6 +41,23 @@ func (c *MetadataInput) Init(config *Config) error {
 		c.tz = time.Now().Local().Location()
 	}
 
+	// Create reader pool based on Max CPU setting, but limited by number of CPU cores
+	maxCPUs := config.Throttle.MaxCPUs
+	if maxCPUs == 0 {
+		maxCPUs = 1
+	}
+	if maxCPUs > runtime.NumCPU() {
+		maxCPUs = runtime.NumCPU()
+	}
+
+	for i := 0; i < maxCPUs; i++ {
+		var r *MetadataReader
+		if r, err = MakeMetadataReader(config.Input.MetaConfig); err != nil {
+			break
+		}
+		c.readers = append(c.readers, r)
+	}
+
 	return err
 }
 
@@ -57,7 +77,8 @@ func (c *MetadataInput) Run() error {
 		return errors.New("No output defined")
 	}
 
-	// Walkthrough arguments
+	// Walkthrough arguments to construct path lists
+	pathLists := make([][]string, 0, len(c.readers))
 	filesToProcess := []string{}
 	for _, arg := range flag.Args()[1:] {
 		_ = filepath.Walk(arg,
@@ -86,6 +107,7 @@ func (c *MetadataInput) Run() error {
 			})
 	}
 
+	// Splits the load
 	numFiles := len(filesToProcess)
 	if numFiles > 0 {
 		// Execute goroutines to process
@@ -126,7 +148,7 @@ func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
 		}
 		return false
 	} else {
-		c.out <- &PipelineChanObj{err: err, data: data}
+		c.out <- &PipelineObj{err: err, data: data}
 		return true
 	}
 }
