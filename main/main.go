@@ -1,10 +1,3 @@
-// This tool dumps EXIF information from images.
-//
-// Example command-line:
-//
-//   exif-read-tool -filepath <file-path>
-//
-
 package main
 
 import (
@@ -14,10 +7,9 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
-	"strings"
 	"time"
 
-	"github.com/cxcheng/exifutil/exiftool"
+	"github.com/cxcheng/exifutil"
 )
 
 func logElapsedTime(start time.Time, label string) {
@@ -36,31 +28,20 @@ func main() {
 		}
 	}()
 
-	var config *exiftool.Config
-	var pipeline *exiftool.Pipeline
+	var config *exifutil.Config
+	var pipeline *exifutil.Pipeline
 	var err error
 
-	// Read and process descriptor file
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s [<flags>] <descriptor.yml> [<input-files>]\n", os.Args[0])
+	// Process input arguments
+	pipelineArgs := exifutil.AddArgs()
+	flag.Parse()
+	if len(flag.Args() < 1) {
+		fmt.Fprintf(os.stderr, "Usage: %s [<config>] <pipeline> [<args>]\n", os.Args[0])
 		os.Exit(1)
 	}
 
-	// Find first argument that's not a flag and use it as path to config file
-	firstNonFlagIdx := 1
-	for firstNonFlagIdx < len(os.Args) {
-		if !strings.HasPrefix(os.Args[firstNonFlagIdx], "-") {
-			break
-		}
-		firstNonFlagIdx++
-	}
-	if firstNonFlagIdx >= len(os.Args) {
-		fmt.Fprintf(os.Stderr, "Usage: %1 [<flags>] <pipeline.yml> <inputs>\n", os.Args[0])
-		os.Exit(1)
-	}
-
-	config, err = exiftool.MakeConfig(os.Args[firstNonFlagIdx])
-	if err != nil {
+	// Read config
+	if config, err = exifutil.MakeConfig(pipelineArgs.ConfPath); err != nil {
 		log.Printf("%s", err)
 		os.Exit(1)
 	}
@@ -77,13 +58,12 @@ func main() {
 	}
 
 	// Construct and initialize pipeline arguments
-	if pipeline, err = exiftool.MakePipeline(config); err != nil {
+	if pipeline, err = exifutil.MakePipeline(config); err != nil {
 		log.Printf("%s", err)
 		os.Exit(2)
 	}
 
 	// Run pipeline after initializing command-line flags
-	flag.Parse()
 	if err := pipeline.Run(); err != nil {
 		log.Printf("Pipeline error: %s", err)
 		os.Exit(2)

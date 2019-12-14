@@ -1,8 +1,7 @@
-package exiftool
+package exifutil
 
 import (
 	"encoding/csv"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -17,7 +16,6 @@ type ExifOutput struct {
 	outPathArg string
 	outType    string
 	tagsToLoad []string
-	useValues  bool
 }
 
 func (c *ExifOutput) Init(config *Config) error {
@@ -27,12 +25,6 @@ func (c *ExifOutput) Init(config *Config) error {
 	if c.outType == "" {
 		c.outType = "csv"
 	}
-
-	// Add command-line args
-	flag.StringVar(&c.colsArg, "cols", "", "Columns to output")
-	flag.StringVar(&c.outPathArg, "out", "", "Output pathname")
-	flag.StringVar(&c.outType, "type", "csv", "Output type: csv, json, keys")
-	flag.BoolVar(&c.useValues, "values", false, "Output value instead of original text")
 
 	return nil
 }

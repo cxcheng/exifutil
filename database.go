@@ -1,4 +1,4 @@
-package exiftool
+package exifutil
 
 import (
 	"context"
@@ -69,35 +69,36 @@ func (c *ExifDB) Run() error {
 	}
 
 	for {
-		exifData := <-c.in
+		o := <-c.in
 		if c.out != nil {
 			// Forward to next stage
-			c.out <- exifData
+			c.out <- o
 		}
-		if exifData == nil {
+		if o == nil || o.err != nil {
 			// No more inputs, exit
 			break
 		}
 
 		var err error
-		path := exifData.Get("Sys/Path")
+		for _, md := range o.data {
+			path := md.Expr("File Name")
 
-		// Forward to next stage
+			// Forward to next stage
 
-		// Insert database record
-		var bdoc map[string]string
-		if err = bson.UnmarshalExtJSON([]byte(exifData.Json()), true, &bdoc); err != nil {
-			log.Printf("[%s] parse error: %s", exifData.Get("Sys/Path"), err)
-			// skip to next
-			continue
+			// Insert database record
+			var bdoc map[string]string
+			if err = bson.UnmarshalExtJSON([]byte(md.Json()), true, &bdoc); err != nil {
+				log.Printf("[%s] parse error: %s", md.Expr("File Name"), err)
+				// skip to next
+				continue
+			}
+			var rs *mongo.InsertOneResult
+			if rs, err = c.collection.InsertOne(c.ctx, &bdoc); err != nil {
+				log.Printf("[%s] insert error: %s", path, err)
+				continue
+			}
+			log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
 		}
-		var rs *mongo.InsertOneResult
-		if rs, err = c.collection.InsertOne(c.ctx, &bdoc); err != nil {
-			log.Printf("[%s] insert error: %s", path, err)
-			continue
-		}
-		log.Printf("[%s] inserted record [%v]", path, rs.InsertedID)
-
 	}
 	return nil
 }

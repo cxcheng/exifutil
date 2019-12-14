@@ -1,6 +1,8 @@
 package exifutil
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -12,8 +14,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Knetic/govaluate"
 	"github.com/barasher/go-exiftool"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 var convertToNumberSuffix = []string{" mm", " m"}
@@ -159,9 +162,19 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 					}
 				}
 			} else if f64, ok := v.(float64); ok {
+				const maxUint16 = float64(^uint16(0))
+				const maxInt32 = float64(int(^uint32(0) >> 1))
+				const minInt32 = float64(-maxInt32 - 1)
+
 				// Convert to integer if no fractional part
 				if f64 == math.Trunc(f64) {
-					v = int64(f64)
+					if f64 >= 0 && f64 < maxUint16 {
+						v = uint16(f64)
+					} else if f64 > minInt32 && f64 < maxInt32 {
+						v = int32(f64)
+					} else {
+						v = int64(f64)
+					}
 				}
 			}
 
@@ -189,4 +202,67 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+func (d *Metadata) Expr(expr string) interface{} {
+	// If it starts and end with a "@", it is an expression
+	// If it starts with a "%", it is a template
+	// Otherwise, it is a column
+	var result interface{}
+	if len(expr) > 0 {
+		if expr[0] == '@' {
+			return d.Eval(expr[1:])
+		} else if expr[0] == '%' {
+			expr2 := expr[1:]
+			rsBuf := bytes.NewBufferString("")
+			state, pos := 0, 0
+			for i := 0; i < len(expr2); i++ {
+				c := rune(expr2[i])
+				switch state {
+				case 0: // normal, ready
+					if c == '[' {
+						state, pos = 1, i+1
+					} else {
+						rsBuf.WriteRune(c)
+					}
+				case 1: // waiting for ']' to close, or end of expr
+					if c == ']' || i >= (len(expr2)-1) {
+						d.expandTag(rsBuf, expr2[pos:i])
+						state = 0
+					}
+				}
+			}
+			return rsBuf.String()
+		} else {
+			// Get tag value directly
+			if result, found := d.V[expr]; found {
+				return result
+			}
+		}
+	}
+	return ""
+}
+
+func (d *Metadata) Eval(expr string) interface{} {
+	var result interface{}
+	var err error
+	if len(expr) > 0 {
+		var eval *govaluate.EvaluableExpression
+		if eval, err = govaluate.NewEvaluableExpression(expr); err == nil {
+			var rs interface{}
+			if result, err = eval.Evaluate(d.V); err != nil {
+				log.Printf("Error evaluating [%s]: %v", expr, err)
+				result = ""
+			}
+		}
+	}
+	return result
+}
+
+func (d *Metadata) ExprString(expr string) string {
+	return fmt.Sprintf("%v", d.Expr(expr))
+}
+
+func (d *Metadata) Json() string {
+	return json.Marshal(d.V)
 }

@@ -1,7 +1,8 @@
-package exiftool
+package exifutil
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cxcheng/exifutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,12 +19,11 @@ type Config struct {
 	LogPath     string `yaml:"log_path"`
 	Verbose     bool   `yaml:"verbose"`
 
-	Pipeline []string `yaml:"pipeline"`
+	Pipeline map[string][]string `yaml:"pipeline"`
 	Input    struct {
 		FileExts   []string `yaml:"file_exts"`
 		TagsToLoad []string `yaml:"tags_to_load"`
 		Tz         string   `yaml:"timezone"`
-		Trim       bool     `yaml:"trim"`
 	} `yaml:"input"`
 	DB struct {
 		Name      string `yaml:"name"`
@@ -32,12 +31,24 @@ type Config struct {
 		DropFirst bool   `yaml:"drop_first"`
 	} `yaml:"database"`
 	Output struct {
-		Path string `yaml:"path"`
+		Cols []string `yaml:"cols"`
+		Path string   `yaml:"path"`
+		Type string   `yaml:"type"`
 	} `yaml:"output"`
 	Throttle struct {
 		MaxCPUs int `yaml:"max_cpus"`
 		Rate    int `yaml:"rate"`
 	} `yaml:"throttle"`
+}
+
+type PipelingArgs struct {
+	ConfPath string
+}
+
+func AddArgs() *PipelineArgs {
+	args := new(PipelineArgs)
+	flag.StringVar(&args.ConfPath, "conf", "config.yml", "Path to configuration file")
+	return args
 }
 
 func MakeConfig(configPath string) (*Config, error) {
@@ -56,7 +67,12 @@ func MakeConfig(configPath string) (*Config, error) {
 	return config, err
 }
 
-type PipelineChan chan *exifutil.ExifData
+type PipelineObj struct {
+	data []Metadata
+	err  error
+}
+
+type PipelineChan chan *PipelineObj
 
 type PipelineComponent interface {
 	Init(config *Config) error
@@ -72,8 +88,10 @@ type Pipeline struct {
 	next      *Pipeline
 }
 
+var PipelineArgs map[string]interface{}
+
 var PipelineComponentRegistry = map[string]reflect.Type{
-	"input":    reflect.TypeOf(ExifInput{}),
+	"input":    reflect.TypeOf(MetadataInput{}),
 	"output":   reflect.TypeOf(ExifOutput{}),
 	"database": reflect.TypeOf(ExifDB{}),
 }

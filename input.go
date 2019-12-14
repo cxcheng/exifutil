@@ -1,4 +1,4 @@
-package exiftool
+package exifutil
 
 import (
 	"errors"
@@ -8,27 +8,25 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/cxcheng/exifutil"
 )
 
-type ExifInput struct {
-	exitOnError bool
-	fileExts    []string
-	out         PipelineChan
-	trim        bool
-	tagsToLoad  []string
-	tz          *time.Location
+type MetadataInput struct {
+	exitOnError   bool
+	fileExts      []string
+	out           PipelineChan
+	tagsToLoadMap map[string]bool
+	tz            *time.Location
 }
 
-func (c *ExifInput) Init(config *Config) error {
+func (c *MetadataInput) Init(config *Config) error {
 	var err error
 
 	// Copy configs
 	c.exitOnError = config.ExitOnError
 	c.fileExts = config.Input.FileExts
-	c.trim = config.Input.Trim
-	c.tagsToLoad = config.Input.TagsToLoad
+	for _, tagToLoad := range config.Input.TagsToLoad {
+		c.tagsToLoadMap[tagToLoad] = true
+	}
 
 	// Set timezone if specified, otherwise, use local time zone
 	if config.Input.Tz != "" {
@@ -43,17 +41,17 @@ func (c *ExifInput) Init(config *Config) error {
 	return err
 }
 
-func (c *ExifInput) SetInput(in PipelineChan) {
+func (c *MetadataInput) SetInput(in PipelineChan) {
 	if in != nil {
 		log.Fatalf("Cannot set input to starting conent")
 	}
 }
 
-func (c *ExifInput) SetOutput(out PipelineChan) {
+func (c *MetadataInput) SetOutput(out PipelineChan) {
 	c.out = out
 }
 
-func (c *ExifInput) Run() error {
+func (c *MetadataInput) Run() error {
 	// If no output, then exit
 	if c.out == nil {
 		return errors.New("No output defined")
@@ -116,17 +114,19 @@ func (c *ExifInput) Run() error {
 	return nil
 }
 
-func (c *ExifInput) processInput(path string) bool {
-	exifData, err := exifutil.ReadExifData(path, c.tz, c.trim, c.tagsToLoad)
+func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
+	var data []Metadata
+	var err error
+	data, err = r.ReadMetadata(paths, c.tz, c.tagsToLoadMap)
 	if err != nil {
-		log.Printf("[%s] error: %s\n", path, err)
+		log.Printf("%v error: %s\n", paths, err)
 		if c.exitOnError {
 			// If error, notify to stop
 			c.out <- nil
 		}
 		return false
 	} else {
-		c.out <- exifData
+		c.out <- &PipelineChanObj{err: err, data: data}
 		return true
 	}
 }

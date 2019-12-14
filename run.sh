@@ -3,6 +3,6 @@
 if [ $? -ne 0 ]; then
   exit 1
 fi
-echo "Running exiftool..."
-$GOPATH/bin/exiftool $*
+echo "Running exifutil..."
+$GOPATH/bin/exifutil $*
 

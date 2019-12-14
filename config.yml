@@ -1,11 +1,12 @@
 log_path: exif.log
-pipeline: ["input", "database", "output"]
+pipeline:
+  import: ["input", "database", "output"]
+  query: ["query", "output"]
 input:
   exit_on_error: false
   file_exts: [] # empty => read all files
-  load_tags: [] # empty => load all tags
+  tags_to_load: [] # empty => load all tags
   timezone: Asia/Singapore
-  trim: true # trim leading and trailing spaces
 database:
   name: metadata
   uri: "mongodb://localhost:27017"

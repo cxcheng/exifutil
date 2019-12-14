@@ -1,3 +1,3 @@
 #!/bin/bash
-go build -o $GOPATH/bin/exiftool exiftool-cli/main.go
+go build -o $GOPATH/bin/exifutil main/main.go
 
