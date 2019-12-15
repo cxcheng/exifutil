@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// Read config
-	if config, err = exifutil.MakeConfig(confPath); err != nil {
+	if config, err = exifutil.NewConfig(confPath); err != nil {
 		log.Printf("[Main] %s", err)
 		os.Exit(1)
 	}
@@ -59,7 +59,7 @@ func main() {
 	}
 
 	// Construct and initialize pipeline arguments
-	if pipeline, err = exifutil.MakePipeline(config, flag.Args()[0]); err != nil {
+	if pipeline, err = exifutil.NewPipeline(config, flag.Args()[0]); err != nil {
 		log.Printf("[Main] %s", err)
 		os.Exit(2)
 	}

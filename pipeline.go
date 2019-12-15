@@ -42,7 +42,7 @@ type Config struct {
 	} `yaml:"throttle"`
 }
 
-func MakeConfig(configPath string) (*Config, error) {
+func NewConfig(configPath string) (*Config, error) {
 	var config *Config
 	var err error
 
@@ -99,7 +99,7 @@ func MakePipelineComponent(name string) (PipelineComponent, error) {
 	}
 }
 
-func MakePipeline(config *Config, pipelineName string) (*Pipeline, error) {
+func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
 	var pipeline *Pipeline = new(Pipeline)
 	var err error
 

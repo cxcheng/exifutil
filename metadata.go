@@ -6,25 +6,22 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/big"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/Knetic/govaluate"
-	"github.com/barasher/go-exiftool"
 	"gopkg.in/yaml.v3"
 )
 
 var convertToNumberSuffix = []string{" mm", " m"}
 
 type MetadataConfig struct {
-	NameMap    map[string]string `yaml:"map"`
-	SubSecDate map[string]string `yaml:"subsec_date"`
-	Remove     []string          `yaml:"remove"`
+	ExiftoolPath string            `yaml:"exiftool"`
+	NameMap      map[string]string `yaml:"map"`
+	SubSecDate   map[string]string `yaml:"subsec_date"`
+	Remove       []string          `yaml:"remove"`
 }
 
 type Metadata struct {
@@ -35,7 +32,7 @@ type Metadata struct {
 type MetadataReader struct {
 	config     *MetadataConfig
 	removeList []*regexp.Regexp
-	et         *exiftool.Exiftool
+	et         *Exiftool
 }
 
 func MakeMetadataReader(configPath string) (*MetadataReader, error) {
@@ -55,7 +52,14 @@ func MakeMetadataReader(configPath string) (*MetadataReader, error) {
 	reader.config = config
 
 	// Initialize external exiftool
-	if reader.et, err = exiftool.NewExiftool(); err != nil {
+	etInitFunc := func(et *Exiftool) error {
+		if config.ExiftoolPath != "" {
+			et.Binary = config.ExiftoolPath
+		}
+		et.InitArgs = append(et.InitArgs, "-n")
+		return nil
+	}
+	if reader.et, err = NewExiftool(etInitFunc); err != nil {
 		log.Printf("[Metadata] Error intializing MetadataReader: %s", err)
 		return nil, err
 	}
@@ -97,7 +101,6 @@ func parseDate(s string, tz *time.Location) interface{} {
 func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToLoadMap map[string]bool) ([]Metadata, error) {
 	metas := r.et.ExtractMetadata(paths...)
 	results := make([]Metadata, 0, len(metas))
-	efl35mmRe := regexp.MustCompile(`\d+\.?\d* mm \(35 mm equivalent: (\d+\.?\d*) mm\)`)
 	for _, meta := range metas {
 		result := Metadata{
 			Path: meta.File,
@@ -108,6 +111,10 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 			if k2, found := r.config.NameMap[k]; found {
 				if k2 == "" {
 					// Skip the field because it maps to empty
+					continue
+				}
+				// check that we are not overwriting mapped
+				if _, found := result.V[k2]; found {
 					continue
 				}
 				k = k2
@@ -127,14 +134,6 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 				if len(s) == 0 || strings.HasPrefix(s, "(Binary data") {
 					// Skip binary or empty content
 					continue
-				} else if k == "FocalLength35efl" {
-					foundSubstr := efl35mmRe.FindStringSubmatch(s)
-					if len(foundSubstr) == 2 {
-						var f64 float64
-						if _, err := fmt.Sscanf(foundSubstr[1], "%f", &f64); err == nil {
-							v = f64
-						}
-					}
 				} else if k2, found := r.config.SubSecDate[k]; found {
 					k = k2
 					v = parseDate(s, tz)
@@ -142,32 +141,6 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 				} else if strings.Contains(k, "Date") {
 					// If key contains Date, try to convert to time.Time
 					v = parseDate(s, tz)
-				} else if strings.Contains(s, "/") {
-					// Try to convert rational numbers
-					if unicode.IsDigit(rune(s[0])) {
-						r := new(big.Rat)
-						if _, err := fmt.Sscan(s, r); err == nil {
-							v2, _ := r.Float64()
-							// Add a .v field
-							result.V[k+".v"] = v2
-						}
-					}
-				}
-				// Try to convert to numbers for selected units
-				if s2, ok := v.(string); ok {
-					for _, suffix := range convertToNumberSuffix {
-						if strings.HasSuffix(s, suffix) {
-							// Try both int and float, return int if no fractional part
-							t := s2[:len(suffix)]
-							if v2, err := strconv.ParseInt(t, 10, 32); err == nil {
-								v = v2
-								break
-							} else if v2, err := strconv.ParseFloat(t, 64); err == nil {
-								v = v2
-								break
-							}
-						}
-					}
 				}
 			} else if f64, ok := v.(float64); ok {
 				const maxUint16 = float64(^uint16(0))
@@ -209,11 +182,13 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 		}
 
 		// Post-process to remove subsec fields
-		for k, _ := range r.config.SubSecDate {
-			if _, found := result.V[k]; found {
-				delete(result.V, k)
+		/*
+			for k, _ := range r.config.SubSecDate {
+				if _, found := result.V[k]; found {
+					delete(result.V, k)
+				}
 			}
-		}
+		*/
 
 		// Add to results
 		results = append(results, result)

@@ -2,6 +2,8 @@ database:
   drop_first: true
   name: metadata
   uri: "mongodb://localhost:27017"
+  username:
+  password:
 input:
   exit_on_error: false
   file_exts: []
@@ -27,9 +29,7 @@ output:
     - FocalLength35efl
     - ISO
     - Lens
-    - Lens.v
     - ShutterSpeed
-    - ShutterSpeedValue
     - Subject
     - XResolution
     - CompatibleBrands
@@ -39,6 +39,12 @@ output:
     - NoiseReduction
     - NoiseReduction2
     - SelfTimer2
+    - LensType
+    - LensType2
+    - LensType3
+    - Megapixels
+    - MultiExposureMode
+    - NumberOfImages
   keys: false
   path: metadata
   type: csv

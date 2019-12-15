@@ -10,6 +10,7 @@ remove:
   - ExifToolVersion
   - ISO2
   - OffsetTimeDigitized
+  - Other.*
   - Sony.*
   - SubSec.*
   - Strip.*
