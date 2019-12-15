@@ -17,7 +17,7 @@ func logElapsedTime(start time.Time, label string) {
 	runtime.Callers(2, pc)
 	f := runtime.FuncForPC(pc[0])
 	//file, line := f.FileLine(pc[0])
-	log.Printf("**** [%s]:[%s] elapsed time: %s, %d goroutines", label, f.Name(), time.Since(start), runtime.NumGoroutine())
+	log.Printf("[Main] **** [%s]:[%s] elapsed time: %s, %d goroutines", label, f.Name(), time.Since(start), runtime.NumGoroutine())
 }
 
 func main() {
@@ -33,16 +33,17 @@ func main() {
 	var err error
 
 	// Process input arguments
-	pipelineArgs := exifutil.AddArgs()
+	var confPath string
+	flag.StringVar(&confPath, "conf", "config.yml", "Path to configuration file")
 	flag.Parse()
 	if len(flag.Args()) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s [<config>] <pipeline> [<args>]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [<flags>] <pipeline-to-use> [<args>]\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	// Read config
-	if config, err = exifutil.MakeConfig(pipelineArgs.ConfPath); err != nil {
-		log.Printf("%s", err)
+	if config, err = exifutil.MakeConfig(confPath); err != nil {
+		log.Printf("[Main] %s", err)
 		os.Exit(1)
 	}
 
@@ -59,13 +60,13 @@ func main() {
 
 	// Construct and initialize pipeline arguments
 	if pipeline, err = exifutil.MakePipeline(config, flag.Args()[0]); err != nil {
-		log.Printf("%s", err)
+		log.Printf("[Main] %s", err)
 		os.Exit(2)
 	}
 
 	// Run pipeline after initializing command-line flags
 	if err := pipeline.Run(); err != nil {
-		log.Printf("Pipeline error: %s", err)
+		log.Printf("[Main] %s", err)
 		os.Exit(2)
 	} else {
 		os.Exit(0)

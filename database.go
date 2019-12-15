@@ -26,7 +26,7 @@ func (c *MetadataDB) Init(config *Config) error {
 	// Setup config
 	dbName := config.DB.Name
 	if dbName == "" {
-		dbName = "exif_data"
+		dbName = "metadata"
 	}
 
 	// Setup client
@@ -36,15 +36,14 @@ func (c *MetadataDB) Init(config *Config) error {
 	} else {
 		uri = config.DB.URI
 	}
-	log.Printf("Connecting to MongoDB [%v/%v]", uri, dbName)
+	log.Printf("[Database] Connecting to MongoDB [%v/%v]", uri, dbName)
 
 	c.ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
-	println(uri)
 	if c.client, err = mongo.Connect(c.ctx, options.Client().ApplyURI(uri)); err == nil {
 		c.collection = c.client.Database(dbName).Collection("metadata")
 		// Recreate collection from scratch
 		if config.DB.DropFirst {
-			log.Printf("Dropping collection metadata first")
+			log.Printf("[Database] Dropping collection metadata first")
 			if err = c.collection.Drop(c.ctx); err != nil {
 				return err
 			}
@@ -65,7 +64,7 @@ func (c *MetadataDB) SetOutput(out PipelineChan) {
 
 func (c *MetadataDB) Run() error {
 	if c.in == nil {
-		return errors.New("No input defined")
+		return errors.New("[Database] No input defined")
 	}
 
 	for {
@@ -86,22 +85,28 @@ func (c *MetadataDB) Run() error {
 			id := md.ConstructKey()
 			findRs := c.collection.FindOne(c.ctx, bson.M{"_id": id})
 			var findRsV interface{}
+
+			if _, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V); err != nil {
+				log.Printf("[Database]22: [%s] replace error: %s", path, err)
+				continue
+			}
+
 			if err := findRs.Decode(&findRsV); err == nil {
 				// Update existing record
 				if _, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V); err != nil {
-					log.Printf("[%s] replace error: %s", path, err)
+					log.Printf("[Database] [%s] replace error: %s", path, err)
 					continue
 				}
-				log.Printf("[%s] updated record [%v]", path, id)
+				log.Printf("[Database] [%s] replaced DB %v", path, id)
 			} else {
 				// Insert database record
 				md.V["_id"] = id
 				rs, err := c.collection.InsertOne(c.ctx, md.V)
 				if err != nil {
-					log.Printf("[%s] insert error: %s", path, err)
+					log.Printf("[Database] [%s] insert: %s", path, err)
 					continue
 				}
-				log.Printf("[%s] inserted record [%v] %s", path, rs.InsertedID, id)
+				log.Printf("[Database] [%s] inserted %v", path, rs.InsertedID)
 			}
 
 		}

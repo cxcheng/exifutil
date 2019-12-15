@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ var convertToNumberSuffix = []string{" mm", " m"}
 type MetadataConfig struct {
 	NameMap    map[string]string `yaml:"map"`
 	SubSecDate map[string]string `yaml:"subsec_date"`
+	Remove     []string          `yaml:"remove"`
 }
 
 type Metadata struct {
@@ -31,9 +33,9 @@ type Metadata struct {
 }
 
 type MetadataReader struct {
-	config *MetadataConfig
-	et     *exiftool.Exiftool
-	stats  map[string]interface{}
+	config     *MetadataConfig
+	removeList []*regexp.Regexp
+	et         *exiftool.Exiftool
 }
 
 func MakeMetadataReader(configPath string) (*MetadataReader, error) {
@@ -46,15 +48,26 @@ func MakeMetadataReader(configPath string) (*MetadataReader, error) {
 	if f, err = os.Open(configPath); err == nil {
 		decoder := yaml.NewDecoder(f)
 		if err = decoder.Decode(config); err != nil {
-			log.Printf("Error reading config [%s]: %s", configPath, err)
+			log.Printf("[Metadata] Error reading config [%s]: %s", configPath, err)
 		}
 		defer f.Close() // close immediately after exiting this
 	}
 	reader.config = config
 
+	// Initialize external exiftool
 	if reader.et, err = exiftool.NewExiftool(); err != nil {
-		log.Printf("Error intializing MetadataReader: %s", err)
+		log.Printf("[Metadata] Error intializing MetadataReader: %s", err)
 		return nil, err
+	}
+
+	// Process the regexp
+	reader.removeList = make([]*regexp.Regexp, 0, len(config.Remove))
+	for _, pattern := range config.Remove {
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("[Metadata] Error parsing [%s]: %v", pattern, err)
+		}
+		reader.removeList = append(reader.removeList, regex)
 	}
 	return &reader, nil
 }
@@ -84,6 +97,7 @@ func parseDate(s string, tz *time.Location) interface{} {
 func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToLoadMap map[string]bool) ([]Metadata, error) {
 	metas := r.et.ExtractMetadata(paths...)
 	results := make([]Metadata, 0, len(metas))
+	efl35mmRe := regexp.MustCompile(`\d+\.?\d* mm \(35 mm equivalent: (\d+\.?\d*) mm\)`)
 	for _, meta := range metas {
 		result := Metadata{
 			Path: meta.File,
@@ -113,6 +127,14 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 				if len(s) == 0 || strings.HasPrefix(s, "(Binary data") {
 					// Skip binary or empty content
 					continue
+				} else if k == "FocalLength35efl" {
+					foundSubstr := efl35mmRe.FindStringSubmatch(s)
+					if len(foundSubstr) == 2 {
+						var f64 float64
+						if _, err := fmt.Sscanf(foundSubstr[1], "%f", &f64); err == nil {
+							v = f64
+						}
+					}
 				} else if k2, found := r.config.SubSecDate[k]; found {
 					k = k2
 					v = parseDate(s, tz)
@@ -130,12 +152,13 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 							result.V[k+".v"] = v2
 						}
 					}
-				} else {
-					// Try to convert to numbers for selected units
+				}
+				// Try to convert to numbers for selected units
+				if s2, ok := v.(string); ok {
 					for _, suffix := range convertToNumberSuffix {
 						if strings.HasSuffix(s, suffix) {
 							// Try both int and float, return int if no fractional part
-							t := s[:len(suffix)]
+							t := s2[:len(suffix)]
 							if v2, err := strconv.ParseInt(t, 10, 32); err == nil {
 								v = v2
 								break
@@ -163,8 +186,21 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 				}
 			}
 
-			// Adjust serial number to string
-			if k == "SerialNumber" {
+			// Skip those on the remove list. Can only do that after subsec processing
+			matchedRemoveK := false
+			for _, removeRegexp := range r.removeList {
+				if matchedRemoveK = removeRegexp.MatchString(k); matchedRemoveK {
+					//log.Printf("Skipping tag [%s] -> [%s]", removeRegexp, k)
+					break
+				}
+			}
+			if matchedRemoveK {
+				continue
+			}
+
+			// Adjust specific keys
+			switch k {
+			case "SerialNumber":
 				v = fmt.Sprintf("%v", v)
 			}
 
@@ -240,7 +276,7 @@ func (d *Metadata) Expr(expr string) interface{} {
 			if result, found := d.V[expr]; found {
 				return result
 			} else {
-				return expr
+				return ""
 			}
 		}
 	}

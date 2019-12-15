@@ -2,7 +2,6 @@ package exifutil
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -33,6 +32,7 @@ type Config struct {
 	} `yaml:"database"`
 	Output struct {
 		Cols []string `yaml:"cols"`
+		Keys bool     `yaml:"keys"`
 		Path string   `yaml:"path"`
 		Type string   `yaml:"type"`
 	} `yaml:"output"`
@@ -40,16 +40,6 @@ type Config struct {
 		MaxCPUs int `yaml:"max_cpus"`
 		Rate    int `yaml:"rate"`
 	} `yaml:"throttle"`
-}
-
-type Args struct {
-	ConfPath string
-}
-
-func AddArgs() *Args {
-	args := new(Args)
-	flag.StringVar(&args.ConfPath, "conf", "config.yml", "Path to configuration file")
-	return args
 }
 
 func MakeConfig(configPath string) (*Config, error) {
@@ -100,12 +90,12 @@ var PipelineComponentRegistry = map[string]reflect.Type{
 func MakePipelineComponent(name string) (PipelineComponent, error) {
 	if componentType, found := PipelineComponentRegistry[name]; found {
 		if component, ok := reflect.New(componentType).Interface().(PipelineComponent); !ok {
-			return nil, errors.New(fmt.Sprintf("Unable to cast [%s:%s] to PipelineComponent", name, componentType))
+			return nil, errors.New(fmt.Sprintf("[Pipeline]: Unable to cast [%s:%s] to PipelineComponent", name, componentType))
 		} else {
 			return component, nil
 		}
 	} else {
-		return nil, errors.New(fmt.Sprintf("Unknown component %s", name))
+		return nil, errors.New(fmt.Sprintf("[Pipeline]: Unknown component %s", name))
 	}
 }
 
@@ -116,7 +106,7 @@ func MakePipeline(config *Config, pipelineName string) (*Pipeline, error) {
 	// Build pipeline from config
 	pipelineConfig, found := config.Pipeline[pipelineName]
 	if !found {
-		return nil, fmt.Errorf("Pipeline [%s] not defined", pipelineName)
+		return nil, fmt.Errorf("[Pipeline]: [%s] not defined", pipelineName)
 	}
 	lastStage := pipeline
 	for _, componentName := range pipelineConfig {
@@ -126,7 +116,7 @@ func MakePipeline(config *Config, pipelineName string) (*Pipeline, error) {
 		}
 		lastStage = lastStage.Add(componentName, component)
 		if lastStage == nil {
-			return nil, errors.New(fmt.Sprintf("Error adding component [%s]", componentName))
+			return nil, errors.New(fmt.Sprintf("[Pipeline]: Error adding [%s]", componentName))
 		}
 	}
 
@@ -145,7 +135,7 @@ func (p *Pipeline) Add(name string, component PipelineComponent) *Pipeline {
 
 	// Add() can only be called once
 	if p.next != nil {
-		log.Printf("[%s] Add() can only be called once", p.name)
+		log.Printf("[Pipeline]: [%s] Add() can only be called once", p.name)
 		return nil
 	}
 
@@ -161,13 +151,13 @@ func (p *Pipeline) Init(config *Config) error {
 	// Initialize all the pipeline components
 	for stage := p; stage != nil; { //stage = stage.next {
 		if stage.component == nil {
-			return fmt.Errorf("[%s] component not set up", stage.name)
+			return fmt.Errorf("[Pipeline]: [%s] component not set up", stage.name)
 		}
 		if err := stage.component.Init(config); err != nil {
 			// Exit on first error
-			return fmt.Errorf("[%s] init error: %s", stage.name, err)
+			return fmt.Errorf("[Pipeline]: [%s] init error: %s", stage.name, err)
 		}
-		log.Printf("[%s] initialized", stage.name)
+		log.Printf("[Pipeline]: [%s] initialized", stage.name)
 		stage = stage.next
 		if stage != nil {
 		}

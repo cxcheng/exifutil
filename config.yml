@@ -1,19 +1,53 @@
-log_path: metadata.log
-pipeline:
-  import: ["input", "database", "output"]
-  query: ["query", "output"]
-input:
-  exit_on_error: false
-  file_exts: [] # empty => read all files
-  meta_confg: "metadata.yml"
-  tags_to_load: [] # empty => load all tags
-  timezone: Asia/Singapore
 database:
+  drop_first: true
   name: metadata
   uri: "mongodb://localhost:27017"
-  drop_first: false
+input:
+  exit_on_error: false
+  file_exts: []
+  meta_config: metadata.yml
+  tags_to_load: []
+  timezone: Asia/Singapore
+log_path: metadata.log
 output:
-  cols: ["FileName", "Make", "Model", "DateTimeOriginal"]
-  path: metadata.csv
+  cols:
+    - FileName
+    - Make
+    - Model
+    - DateTimeOriginal
+    - GPSAltitude
+    - GPSAltitudeRef
+    - GPSCoordinates
+    - GPSLatitude
+    - GPSLatitudeRef
+    - GPSLongitude
+    - GPSPosition
+    - GPSSpeed
+    - FocalLength
+    - FocalLength35efl
+    - ISO
+    - Lens
+    - Lens.v
+    - ShutterSpeed
+    - ShutterSpeedValue
+    - Subject
+    - XResolution
+    - CompatibleBrands
+    - LensE-mountVersion
+    - OffsetTimeOriginal
+    - OffsetTime
+    - NoiseReduction
+    - NoiseReduction2
+    - SelfTimer2
+  keys: false
+  path: metadata
   type: csv
+pipeline:
+  import:
+    - input
+    - database
+    - output
+  query:
+    - query
+    - output
 verbose: true

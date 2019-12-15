@@ -34,7 +34,7 @@ func (c *MetadataInput) Init(config *Config) error {
 	// Set timezone if specified, otherwise, use local time zone
 	if config.Input.Tz != "" {
 		if c.tz, err = time.LoadLocation(config.Input.Tz); err != nil {
-			log.Printf("Unable to load timezone %s", config.Input.Tz)
+			log.Printf("[Input] Error loading TZ %s: %v", config.Input.Tz, err)
 		}
 	} else {
 		// otherwise use local location
@@ -63,7 +63,7 @@ func (c *MetadataInput) Init(config *Config) error {
 
 func (c *MetadataInput) SetInput(in PipelineChan) {
 	if in != nil {
-		log.Fatalf("Cannot set input to starting conent")
+		log.Fatalf("[Input] Input not allowed")
 	}
 }
 
@@ -74,7 +74,7 @@ func (c *MetadataInput) SetOutput(out PipelineChan) {
 func (c *MetadataInput) Run() error {
 	// If no output, then exit
 	if c.out == nil {
-		return errors.New("No output defined")
+		return errors.New("[Input] No output defined")
 	}
 
 	// Walkthrough arguments to construct path lists
@@ -124,16 +124,16 @@ func (c *MetadataInput) Run() error {
 				start := time.Now()
 				success := c.processInput(r, paths)
 				if success {
-					numSuccesses++
+					numSuccesses += len(paths)
 				}
-				log.Printf("[%v] elapsed time: %s, success: %v", paths, time.Since(start), success)
+				log.Printf("[Input] %v elapsed time: %v, success: %v", paths, time.Since(start), success)
 				wg.Done()
 			}(c.readers[i], pathsToProcess)
 		}
 		wg.Wait()
-		log.Printf("Finished input: [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numFiles-numSuccesses)
+		log.Printf("[Input] [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numFiles-numSuccesses)
 	} else {
-		log.Println("No files to process")
+		log.Println("[Input] No files to process")
 	}
 
 	// Signal finish
@@ -146,7 +146,7 @@ func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
 	var err error
 	data, err = r.ReadMetadata(paths, c.tz, c.tagsToLoadMap)
 	if err != nil {
-		log.Printf("%v error: %s\n", paths, err)
+		log.Printf("[Input] %v error: %s\n", paths, err)
 		if c.exitOnError {
 			// If error, notify to stop
 			c.out <- nil
