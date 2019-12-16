@@ -78,37 +78,31 @@ func (c *MetadataDB) Run() error {
 			break
 		}
 
+		updateOpt := options.ReplaceOptions{}
+		updateOpt.SetUpsert(true)
 		for _, md := range o.data {
 			path := md.Expr("FileName")
 
-			// Check if there is existing record
+			// Try replace any existing record first, if none, then insert
+			// We do that by using unique key
 			id := md.ConstructKey()
-			findRs := c.collection.FindOne(c.ctx, bson.M{"_id": id})
-			var findRsV interface{}
-
-			if _, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V); err != nil {
-				log.Printf("[Database]22: [%s] replace error: %s", path, err)
+			md.V["_id"] = id
+			replaceResult, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V)
+			if err != nil {
+				log.Printf("[Database] [%s] replace error: %s", path, err)
 				continue
 			}
-
-			if err := findRs.Decode(&findRsV); err == nil {
-				// Update existing record
-				if _, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V); err != nil {
-					log.Printf("[Database] [%s] replace error: %s", path, err)
-					continue
-				}
-				log.Printf("[Database] [%s] replaced DB %v", path, id)
-			} else {
-				// Insert database record
-				md.V["_id"] = id
-				rs, err := c.collection.InsertOne(c.ctx, md.V)
+			if replaceResult.MatchedCount == 0 {
+				// Cannot replace, we will try to insert
+				insertResult, err := c.collection.InsertOne(c.ctx, md.V)
 				if err != nil {
 					log.Printf("[Database] [%s] insert: %s", path, err)
 					continue
 				}
-				log.Printf("[Database] [%s] inserted %v", path, rs.InsertedID)
+				log.Printf("[Database] [%s] inserted %v", path, insertResult.InsertedID)
+			} else {
+				log.Printf("[Database] [%s] replaced [%s]", path, id)
 			}
-
 		}
 	}
 	return nil

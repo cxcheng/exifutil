@@ -30,31 +30,35 @@ type Metadata struct {
 }
 
 type MetadataReader struct {
-	config     *MetadataConfig
-	removeList []*regexp.Regexp
-	et         *Exiftool
+	config        *MetadataConfig
+	removeList    []*regexp.Regexp
+	tagsToLoadMap map[string]bool
+	tz            *time.Location
+	et            *Exiftool
 }
 
-func MakeMetadataReader(configPath string) (*MetadataReader, error) {
+func NewMetadataReader(metaConfigPath string, tz *time.Location, tagsToLoadMap map[string]bool) (*MetadataReader, error) {
 	var err error
 
 	reader := MetadataReader{}
 
-	config := new(MetadataConfig)
+	metaConfig := new(MetadataConfig)
 	var f *os.File
-	if f, err = os.Open(configPath); err == nil {
+	if f, err = os.Open(metaConfigPath); err == nil {
 		decoder := yaml.NewDecoder(f)
-		if err = decoder.Decode(config); err != nil {
-			log.Printf("[Metadata] Error reading config [%s]: %s", configPath, err)
+		if err = decoder.Decode(metaConfig); err != nil {
+			log.Printf("[Metadata] Error reading config [%s]: %s", metaConfigPath, err)
 		}
 		defer f.Close() // close immediately after exiting this
 	}
-	reader.config = config
+	reader.config = metaConfig
+	reader.tagsToLoadMap = tagsToLoadMap
+	reader.tz = tz
 
 	// Initialize external exiftool
 	etInitFunc := func(et *Exiftool) error {
-		if config.ExiftoolPath != "" {
-			et.Binary = config.ExiftoolPath
+		if metaConfig.ExiftoolPath != "" {
+			et.Binary = metaConfig.ExiftoolPath
 		}
 		et.InitArgs = append(et.InitArgs, "-n")
 		return nil
@@ -65,8 +69,8 @@ func MakeMetadataReader(configPath string) (*MetadataReader, error) {
 	}
 
 	// Process the regexp
-	reader.removeList = make([]*regexp.Regexp, 0, len(config.Remove))
-	for _, pattern := range config.Remove {
+	reader.removeList = make([]*regexp.Regexp, 0, len(metaConfig.Remove))
+	for _, pattern := range metaConfig.Remove {
 		regex, err := regexp.Compile(pattern)
 		if err != nil {
 			return nil, fmt.Errorf("[Metadata] Error parsing [%s]: %v", pattern, err)
@@ -98,7 +102,84 @@ func parseDate(s string, tz *time.Location) interface{} {
 	}
 }
 
-func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToLoadMap map[string]bool) ([]Metadata, error) {
+func (r *MetadataReader) ProcessMetadata(out map[string]interface{}, meta FileMetadata) {
+	for k, v := range meta.Fields {
+		// Translate/transform common fields with different field anems
+		if k2, found := r.config.NameMap[k]; found {
+			if k2 == "" {
+				// Skip the field because it maps to empty
+				continue
+			}
+			// check that we are not overwriting mapped
+			if _, found := out[k2]; found {
+				continue
+			}
+			k = k2
+		}
+
+		// Skip fields that are not specified in the include list
+		if len(r.tagsToLoadMap) > 0 {
+			if _, found := r.tagsToLoadMap[k]; !found {
+				// Skip if it is not on the include list
+				continue
+			}
+		}
+
+		if s, ok := v.(string); ok {
+			// Adjust some string encoded values to binary form
+			v = strings.TrimSpace(s) // trim spaces first
+			if len(s) == 0 || strings.HasPrefix(s, "(Binary data") {
+				// Skip binary or empty content
+				continue
+			} else if k2, found := r.config.SubSecDate[k]; found {
+				k = k2
+				v = parseDate(s, r.tz)
+				// Update new value as k2, but remove original k in post-process pass
+			} else if strings.Contains(k, "Date") {
+				// If key contains Date, try to convert to time.Time
+				v = parseDate(s, r.tz)
+			}
+		} else if f64, ok := v.(float64); ok {
+			const maxUint16 = float64(^uint16(0))
+			const maxInt32 = float64(int(^uint32(0) >> 1))
+			const minInt32 = float64(-maxInt32 - 1)
+
+			// Convert to integer if no fractional part
+			if f64 == math.Trunc(f64) {
+				if f64 >= 0 && f64 < maxUint16 {
+					v = uint16(f64)
+				} else if f64 > minInt32 && f64 < maxInt32 {
+					v = int32(f64)
+				} else {
+					v = int64(f64)
+				}
+			}
+		}
+
+		// Skip those on the remove list. Can only do that after subsec processing
+		matchedRemoveK := false
+		for _, removeRegexp := range r.removeList {
+			if matchedRemoveK = removeRegexp.MatchString(k); matchedRemoveK {
+				//log.Printf("Skipping tag [%s] -> [%s]", removeRegexp, k)
+				break
+			}
+		}
+		if matchedRemoveK {
+			continue
+		}
+
+		// Adjust specific keys
+		switch k {
+		case "SerialNumber":
+			v = fmt.Sprintf("%v", v)
+		}
+
+		//fmt.Printf("%s[%v] %v    - %s\n", meta.File, k, v, reflect.TypeOf(v))
+		out[k] = v
+	}
+}
+
+func (r *MetadataReader) ReadMetadata(paths []string) ([]Metadata, error) {
 	metas := r.et.ExtractMetadata(paths...)
 	results := make([]Metadata, 0, len(metas))
 	for _, meta := range metas {
@@ -106,90 +187,7 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 			Path: meta.File,
 			V:    make(map[string]interface{}),
 		}
-		for k, v := range meta.Fields {
-			// Translate/transform common fields with different field anems
-			if k2, found := r.config.NameMap[k]; found {
-				if k2 == "" {
-					// Skip the field because it maps to empty
-					continue
-				}
-				// check that we are not overwriting mapped
-				if _, found := result.V[k2]; found {
-					continue
-				}
-				k = k2
-			}
-
-			// Skip fields that are not specified in the include list
-			if len(tagsToLoadMap) > 0 {
-				if _, found := tagsToLoadMap[k]; !found {
-					// Skip if it is not on the include list
-					continue
-				}
-			}
-
-			if s, ok := v.(string); ok {
-				// Adjust some string encoded values to binary form
-				v = strings.TrimSpace(s) // trim spaces first
-				if len(s) == 0 || strings.HasPrefix(s, "(Binary data") {
-					// Skip binary or empty content
-					continue
-				} else if k2, found := r.config.SubSecDate[k]; found {
-					k = k2
-					v = parseDate(s, tz)
-					// Update new value as k2, but remove original k in post-process pass
-				} else if strings.Contains(k, "Date") {
-					// If key contains Date, try to convert to time.Time
-					v = parseDate(s, tz)
-				}
-			} else if f64, ok := v.(float64); ok {
-				const maxUint16 = float64(^uint16(0))
-				const maxInt32 = float64(int(^uint32(0) >> 1))
-				const minInt32 = float64(-maxInt32 - 1)
-
-				// Convert to integer if no fractional part
-				if f64 == math.Trunc(f64) {
-					if f64 >= 0 && f64 < maxUint16 {
-						v = uint16(f64)
-					} else if f64 > minInt32 && f64 < maxInt32 {
-						v = int32(f64)
-					} else {
-						v = int64(f64)
-					}
-				}
-			}
-
-			// Skip those on the remove list. Can only do that after subsec processing
-			matchedRemoveK := false
-			for _, removeRegexp := range r.removeList {
-				if matchedRemoveK = removeRegexp.MatchString(k); matchedRemoveK {
-					//log.Printf("Skipping tag [%s] -> [%s]", removeRegexp, k)
-					break
-				}
-			}
-			if matchedRemoveK {
-				continue
-			}
-
-			// Adjust specific keys
-			switch k {
-			case "SerialNumber":
-				v = fmt.Sprintf("%v", v)
-			}
-
-			//fmt.Printf("%s[%v] %v    - %s\n", meta.File, k, v, reflect.TypeOf(v))
-			result.V[k] = v
-		}
-
-		// Post-process to remove subsec fields
-		/*
-			for k, _ := range r.config.SubSecDate {
-				if _, found := result.V[k]; found {
-					delete(result.V, k)
-				}
-			}
-		*/
-
+		r.ProcessMetadata(result.V, meta)
 		// Add to results
 		results = append(results, result)
 	}
@@ -198,16 +196,19 @@ func (r *MetadataReader) ReadMetadata(paths []string, tz *time.Location, tagsToL
 
 func (d *Metadata) ConstructKey() string {
 	// Compute unique key hash
-	ts, found := d.V["DateTimeOriginal"]
-	if !found {
-		ts = time.Time{}
+	var tsSec int64 = 0
+	if tsV, found := d.V["DateTimeOriginal"]; found {
+		if ts, ok := tsV.(time.Time); ok {
+			tsSec = ts.Unix()
+		}
 	}
-	key := fmt.Sprintf("%s%s%s%s",
-		d.V["ImageUniqueID"], d.V["FileName"], d.V["SerialNumber"], ts)
+	//tsStr := fmt.Sprintf("%s", ts)[:19]
+	key := fmt.Sprintf("%v%v%v%d",
+		d.V["ImageUniqueID"], d.V["FileName"], d.V["SerialNumber"], tsSec)
 
 	const (
 		p uint64 = 31
-		m uint64 = 4710343600320809
+		m uint64 = 0x5713bc0855113129
 	)
 	var hash uint64 = 0
 	var pow uint64 = 1
@@ -215,6 +216,8 @@ func (d *Metadata) ConstructKey() string {
 		hash = (hash + (uint64(c)-'a'+1)*pow) % m
 		pow = (pow * p) % m
 	}
+
+	//log.Printf(">>>>>> %s %s -> %q\n", d.V["FileName"], key, fmt.Sprintf("%016x", hash))
 	return fmt.Sprintf("%016x", hash)
 }
 

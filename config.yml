@@ -1,9 +1,11 @@
 database:
-  drop_first: true
+  drop_first: false
   name: metadata
   uri: "mongodb://localhost:27017"
-  username:
-  password:
+  auth:
+    username:
+    password:
+    source:
 input:
   exit_on_error: false
   file_exts: []
@@ -19,7 +21,6 @@ output:
     - DateTimeOriginal
     - GPSAltitude
     - GPSAltitudeRef
-    - GPSCoordinates
     - GPSLatitude
     - GPSLatitudeRef
     - GPSLongitude

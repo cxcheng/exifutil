@@ -12,11 +12,9 @@ import (
 )
 
 type MetadataInput struct {
-	exitOnError   bool
-	fileExts      []string
-	out           PipelineChan
-	tagsToLoadMap map[string]bool
-	tz            *time.Location
+	exitOnError bool
+	fileExts    []string
+	out         PipelineChan
 
 	readers []*MetadataReader
 }
@@ -27,18 +25,23 @@ func (c *MetadataInput) Init(config *Config) error {
 	// Copy configs
 	c.exitOnError = config.ExitOnError
 	c.fileExts = config.Input.FileExts
-	for _, tagToLoad := range config.Input.TagsToLoad {
-		c.tagsToLoadMap[tagToLoad] = true
-	}
 
 	// Set timezone if specified, otherwise, use local time zone
+	var tz *time.Location
 	if config.Input.Tz != "" {
-		if c.tz, err = time.LoadLocation(config.Input.Tz); err != nil {
+		if tz, err = time.LoadLocation(config.Input.Tz); err != nil {
 			log.Printf("[Input] Error loading TZ %s: %v", config.Input.Tz, err)
 		}
-	} else {
-		// otherwise use local location
-		c.tz = time.Now().Local().Location()
+	}
+	if tz == nil {
+		// Substitute with local timezone is none specified
+		tz = time.Now().Local().Location()
+	}
+
+	// Setup tags to load map
+	var tagsToLoadMap map[string]bool
+	for _, tagToLoad := range config.Input.TagsToLoad {
+		tagsToLoadMap[tagToLoad] = true
 	}
 
 	// Create reader pool based on Max CPU setting, but limited by number of CPU cores
@@ -52,7 +55,7 @@ func (c *MetadataInput) Init(config *Config) error {
 
 	for i := 0; i < maxCPUs; i++ {
 		var r *MetadataReader
-		if r, err = MakeMetadataReader(config.Input.MetaConfig); err != nil {
+		if r, err = NewMetadataReader(config.Input.MetaConfig, tz, tagsToLoadMap); err != nil {
 			break
 		}
 		c.readers = append(c.readers, r)
@@ -120,15 +123,15 @@ func (c *MetadataInput) Run() error {
 		wg.Add(len(c.readers))
 		numSuccesses := 0
 		for i, pathsToProcess := range pathLists {
-			go func(r *MetadataReader, paths []string) {
+			go func(i int, r *MetadataReader, paths []string) {
 				start := time.Now()
 				success := c.processInput(r, paths)
 				if success {
 					numSuccesses += len(paths)
 				}
-				log.Printf("[Input] %v elapsed time: %v, success: %v", paths, time.Since(start), success)
+				log.Printf("[Input] Goroutine %d - %d files, elapsed time: %v, success: %v", i, len(paths), time.Since(start), success)
 				wg.Done()
-			}(c.readers[i], pathsToProcess)
+			}(i, c.readers[i], pathsToProcess)
 		}
 		wg.Wait()
 		log.Printf("[Input] [%d] files, [%d] successes, [%d] errors", numFiles, numSuccesses, numFiles-numSuccesses)
@@ -144,7 +147,7 @@ func (c *MetadataInput) Run() error {
 func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
 	var data []Metadata
 	var err error
-	data, err = r.ReadMetadata(paths, c.tz, c.tagsToLoadMap)
+	data, err = r.ReadMetadata(paths)
 	if err != nil {
 		log.Printf("[Input] %v error: %s\n", paths, err)
 		if c.exitOnError {

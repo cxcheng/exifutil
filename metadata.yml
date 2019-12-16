@@ -8,8 +8,9 @@ map:
   ShutterSpeedValue: ShutterSpeed
 remove:
   - ExifToolVersion
+  - GPSCoordinates
   - ISO2
-  - OffsetTimeDigitized
+  - OffsetTime*
   - Other.*
   - Sony.*
   - SubSec.*
