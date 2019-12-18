@@ -10,6 +10,9 @@ input:
   exit_on_error: false
   file_exts: []
   meta_config: metadata.yml
+  mime_types:
+    - image/.*
+    - video/.*
   tags_to_load: []
   timezone: Asia/Singapore
 log_path: metadata.log
@@ -20,11 +23,8 @@ output:
     - Model
     - DateTimeOriginal
     - GPSAltitude
-    - GPSAltitudeRef
     - GPSLatitude
-    - GPSLatitudeRef
     - GPSLongitude
-    - GPSPosition
     - GPSSpeed
     - FocalLength
     - FocalLength35efl
@@ -35,17 +35,14 @@ output:
     - XResolution
     - CompatibleBrands
     - LensE-mountVersion
-    - OffsetTimeOriginal
-    - OffsetTime
     - NoiseReduction
     - NoiseReduction2
     - SelfTimer2
-    - LensType
-    - LensType2
-    - LensType3
     - Megapixels
     - MultiExposureMode
     - NumberOfImages
+    - MIMEType
+    - FileType
   keys: false
   path: metadata
   type: csv

@@ -3,9 +3,11 @@ package exifutil
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sync"
 	"time"
@@ -13,7 +15,8 @@ import (
 
 type MetadataInput struct {
 	exitOnError bool
-	fileExts    []string
+	fileExts    []*regexp.Regexp
+	mimeTypes   []*regexp.Regexp
 	out         PipelineChan
 
 	readers []*MetadataReader
@@ -23,8 +26,23 @@ func (c *MetadataInput) Init(config *Config) error {
 	var err error
 
 	// Copy configs
-	c.exitOnError = config.ExitOnError
-	c.fileExts = config.Input.FileExts
+	c.exitOnError = config.Input.ExitOnError
+	c.fileExts = make([]*regexp.Regexp, 0, len(config.Input.FileExts))
+	for _, pattern := range config.Input.FileExts {
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("[Input] Error parsing fileExt [%s]: %v", pattern, err)
+		}
+		c.fileExts = append(c.fileExts, regex)
+	}
+	c.mimeTypes = make([]*regexp.Regexp, 0, len(config.Input.MimeTypes))
+	for _, pattern := range config.Input.MimeTypes {
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("[Input] Error parsing mimeType [%s]: %v", pattern, err)
+		}
+		c.mimeTypes = append(c.mimeTypes, regex)
+	}
 
 	// Set timezone if specified, otherwise, use local time zone
 	var tz *time.Location
@@ -95,9 +113,13 @@ func (c *MetadataInput) Run() error {
 				// Filter out file based on extension
 				matchedExt := false
 				if len(c.fileExts) > 0 {
-					for _, ext := range c.fileExts {
-						if filepath.Ext(path) == "."+ext {
-							matchedExt = true
+					fileExt := filepath.Ext(path)
+					if len(fileExt) > 1 {
+						// fileExt is of the form ".*". We need to strip first .
+						for _, ext := range c.fileExts {
+							if matchedExt = ext.MatchString(fileExt[1:]); matchedExt {
+								break
+							}
 						}
 					}
 				} else {
@@ -156,6 +178,31 @@ func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
 		}
 		return false
 	} else {
+		// Filter by MIME type
+		if len(c.mimeTypes) > 0 {
+			filteredData := make([]Metadata, 0, len(data))
+			for _, dataEntry := range data {
+				matched := false
+				for _, mimeType := range c.mimeTypes {
+					if v, exists := dataEntry.V["MIMEType"]; exists {
+						if dataMimeType, ok := v.(string); ok {
+							if matched = mimeType.MatchString(dataMimeType); matched {
+								break
+							}
+						}
+					} else {
+						// no MIMEType. Consider fail
+						break
+					}
+				}
+				if matched {
+					filteredData = append(filteredData, dataEntry)
+				}
+			}
+			// replace with filtered list
+			data = filteredData
+		}
+
 		c.out <- &PipelineObj{err: err, data: data}
 		return true
 	}

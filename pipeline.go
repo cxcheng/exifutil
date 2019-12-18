@@ -14,16 +14,17 @@ import (
 )
 
 type Config struct {
-	ExitOnError bool   `yaml:"exit_on_error"`
-	LogPath     string `yaml:"log_path"`
-	Verbose     bool   `yaml:"verbose"`
+	LogPath string `yaml:"log_path"`
+	Verbose bool   `yaml:"verbose"`
 
 	Pipeline map[string][]string `yaml:"pipeline"`
 	Input    struct {
-		MetaConfig string   `yaml:"meta_config"`
-		FileExts   []string `yaml:"file_exts"`
-		TagsToLoad []string `yaml:"tags_to_load"`
-		Tz         string   `yaml:"timezone"`
+		ExitOnError bool     `yaml:"exit_on_error"`
+		MetaConfig  string   `yaml:"meta_config"`
+		MimeTypes   []string `yaml:"mime_types"`
+		FileExts    []string `yaml:"file_exts"`
+		TagsToLoad  []string `yaml:"tags_to_load"`
+		Tz          string   `yaml:"timezone"`
 	} `yaml:"input"`
 	DB struct {
 		Name      string `yaml:"name"`

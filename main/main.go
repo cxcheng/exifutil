@@ -60,14 +60,12 @@ func main() {
 
 	// Construct and initialize pipeline arguments
 	if pipeline, err = exifutil.NewPipeline(config, flag.Args()[0]); err != nil {
-		log.Printf("[Main] %s", err)
-		os.Exit(2)
+		log.Fatalf("[Main] %s", err)
 	}
 
 	// Run pipeline after initializing command-line flags
 	if err := pipeline.Run(); err != nil {
-		log.Printf("[Main] %s", err)
-		os.Exit(2)
+		log.Fatalf("[Main] %s", err)
 	} else {
 		os.Exit(0)
 	}
