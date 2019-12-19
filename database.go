@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -38,7 +37,7 @@ func (c *MetadataDB) Init(config *Config) error {
 	}
 	log.Printf("[Database] Connecting to MongoDB [%v/%v]", uri, dbName)
 
-	c.ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
+	c.ctx = context.Background()
 	if c.client, err = mongo.Connect(c.ctx, options.Client().ApplyURI(uri)); err == nil {
 		c.collection = c.client.Database(dbName).Collection("metadata")
 		// Recreate collection from scratch
@@ -84,7 +83,7 @@ func (c *MetadataDB) Run() error {
 			path := md.Expr("FileName")
 
 			// Try replace any existing record first, if none, then insert
-			// We do that by using unique key
+			// We do that by using unique keyls
 			id := md.ConstructKey()
 			md.V["_id"] = id
 			replaceResult, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V)

@@ -70,6 +70,7 @@ func (c *MetadataInput) Init(config *Config) error {
 	if maxCPUs > runtime.NumCPU() {
 		maxCPUs = runtime.NumCPU()
 	}
+	log.Printf("[Input] Using %d readers", maxCPUs)
 
 	for i := 0; i < maxCPUs; i++ {
 		var r *MetadataReader
@@ -105,7 +106,6 @@ func (c *MetadataInput) Run() error {
 	for _, arg := range flag.Args()[1:] {
 		_ = filepath.Walk(arg,
 			func(path string, f os.FileInfo, err error) error {
-
 				// Skip directories or unknown
 				if f == nil || f.IsDir() {
 					return nil
