@@ -1,7 +1,6 @@
 package exifutil
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -96,7 +95,7 @@ func (c *MetadataInput) SetOutput(out PipelineChan) {
 func (c *MetadataInput) Run() error {
 	// If no output, then exit
 	if c.out == nil {
-		return errors.New("[Input] No output defined")
+		return fmt.Errorf("[Input] No output defined")
 	}
 
 	// Walkthrough arguments to construct path lists
@@ -199,7 +198,7 @@ func (c *MetadataInput) processInput(r *MetadataReader, paths []string) bool {
 					filteredData = append(filteredData, dataEntry)
 				}
 			}
-			// replace with filtered list
+			// Replace with filtered list
 			data = filteredData
 		}
 

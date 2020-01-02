@@ -128,7 +128,7 @@ func (c *MetadataOutput) Run() error {
 					csvW.Write(outCols)
 					csvW.Flush()
 				case "json":
-					w.WriteString(fmt.Sprintf("%s\n", md.Json()))
+					w.WriteString(fmt.Sprintf("%s\n", md.JSON()))
 				default:
 					return fmt.Errorf("[Output]: Unknown type [%s]", c.outType)
 				}

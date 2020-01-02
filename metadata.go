@@ -253,9 +253,8 @@ func (d *Metadata) Expr(expr string) interface{} {
 			// Get tag value directly
 			if result, found := d.V[expr]; found {
 				return result
-			} else {
-				return ""
 			}
+			return ""
 		}
 	}
 	return ""
@@ -280,10 +279,9 @@ func (d *Metadata) ExprString(expr string) string {
 	return fmt.Sprintf("%v", d.Expr(expr))
 }
 
-func (d *Metadata) Json() string {
-	if b, err := json.Marshal(d.V); err != nil {
-		return ""
-	} else {
+func (d *Metadata) JSON() string {
+	if b, err := json.Marshal(d.V); err == nil {
 		return string(b)
 	}
+	return ""
 }

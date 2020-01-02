@@ -19,6 +19,11 @@ type MetadataDB struct {
 	collection *mongo.Collection
 }
 
+type MetadataDBLocation struct {
+	Type        string    `json:"type" bson:"type"`
+	Coordinates []float64 `json:"coordinates" bson:"coordinates"`
+}
+
 func (c *MetadataDB) Init(config *Config) error {
 	var err error
 
@@ -81,6 +86,20 @@ func (c *MetadataDB) Run() error {
 		updateOpt.SetUpsert(true)
 		for _, md := range o.data {
 			path := md.Expr("FileName")
+
+			// Adjust coordinates to use MongoDB GeoJSON
+			if longitudeI, found := md.V["GPSLongitude"]; found {
+				if latitudeI, found := md.V["GPSLatitude"]; found {
+					if longitude, ok := longitudeI.(float64); ok {
+						if latitude, ok := latitudeI.(float64); ok {
+							md.V["Location"] = MetadataDBLocation{
+								"Point",
+								[]float64{longitude, latitude},
+							}
+						}
+					}
+				}
+			}
 
 			// Try replace any existing record first, if none, then insert
 			// We do that by using unique keyls

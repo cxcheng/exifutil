@@ -90,14 +90,12 @@ var PipelineComponentRegistry = map[string]reflect.Type{
 
 func MakePipelineComponent(name string) (PipelineComponent, error) {
 	if componentType, found := PipelineComponentRegistry[name]; found {
-		if component, ok := reflect.New(componentType).Interface().(PipelineComponent); !ok {
-			return nil, errors.New(fmt.Sprintf("[Pipeline]: Unable to cast [%s:%s] to PipelineComponent", name, componentType))
-		} else {
+		if component, ok := reflect.New(componentType).Interface().(PipelineComponent); ok {
 			return component, nil
 		}
-	} else {
-		return nil, errors.New(fmt.Sprintf("[Pipeline]: Unknown component %s", name))
+		return nil, errors.New(fmt.Sprintf("[Pipeline]: Unable to cast [%s:%s] to PipelineComponent", name, componentType))
 	}
+	return nil, errors.New(fmt.Sprintf("[Pipeline]: Unknown component %s", name))
 }
 
 func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
@@ -117,7 +115,7 @@ func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
 		}
 		lastStage = lastStage.Add(componentName, component)
 		if lastStage == nil {
-			return nil, errors.New(fmt.Sprintf("[Pipeline]: Error adding [%s]", componentName))
+			return nil, fmt.Errorf("[Pipeline]: Error adding [%s]", componentName)
 		}
 	}
 
@@ -182,7 +180,7 @@ func (p *Pipeline) Run() error {
 		go func(name string, component PipelineComponent) {
 			start := time.Now()
 			if err := component.Run(); err != nil {
-				log.Printf("[%s] error: %s", err)
+				log.Printf("[%s] error: %s", name, err)
 				rtnErr = err
 			}
 			wg.Done()
