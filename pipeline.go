@@ -83,9 +83,10 @@ type Pipeline struct {
 var PipelineArgs map[string]interface{}
 
 var PipelineComponentRegistry = map[string]reflect.Type{
-	"input":    reflect.TypeOf(MetadataInput{}),
-	"output":   reflect.TypeOf(MetadataOutput{}),
-	"database": reflect.TypeOf(MetadataDB{}),
+	"input":   reflect.TypeOf(MetadataInput{}),
+	"output":  reflect.TypeOf(MetadataOutput{}),
+	"dbquery": reflect.TypeOf(MetadataDBQuery{}),
+	"dbstore": reflect.TypeOf(MetadataDBStore{}),
 }
 
 func MakePipelineComponent(name string) (PipelineComponent, error) {

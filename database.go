@@ -2,18 +2,13 @@ package exifutil
 
 import (
 	"context"
-	"errors"
 	"log"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type MetadataDB struct {
-	in  PipelineChan
-	out PipelineChan
-
 	client     *mongo.Client
 	ctx        context.Context
 	collection *mongo.Collection
@@ -56,72 +51,4 @@ func (c *MetadataDB) Init(config *Config) error {
 		}
 	}
 	return err
-}
-
-func (c *MetadataDB) SetInput(in PipelineChan) {
-	c.in = in
-}
-
-func (c *MetadataDB) SetOutput(out PipelineChan) {
-	c.out = out
-}
-
-func (c *MetadataDB) Run() error {
-	if c.in == nil {
-		return errors.New("[Database] No input defined")
-	}
-
-	for {
-		o := <-c.in
-		if c.out != nil {
-			// Forward to next stage
-			c.out <- o
-		}
-		if o == nil || o.err != nil {
-			// No more inputs, exit
-			break
-		}
-
-		updateOpt := options.ReplaceOptions{}
-		updateOpt.SetUpsert(true)
-		for _, md := range o.data {
-			path := md.Expr("FileName")
-
-			// Adjust coordinates to use MongoDB GeoJSON
-			if longitudeI, found := md.V["GPSLongitude"]; found {
-				if latitudeI, found := md.V["GPSLatitude"]; found {
-					if longitude, ok := longitudeI.(float64); ok {
-						if latitude, ok := latitudeI.(float64); ok {
-							md.V["Location"] = MetadataDBLocation{
-								"Point",
-								[]float64{longitude, latitude},
-							}
-						}
-					}
-				}
-			}
-
-			// Try replace any existing record first, if none, then insert
-			// We do that by using unique keyls
-			id := md.ConstructKey()
-			md.V["_id"] = id
-			replaceResult, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V)
-			if err != nil {
-				log.Printf("[Database] [%s] replace error: %s", path, err)
-				continue
-			}
-			if replaceResult.MatchedCount == 0 {
-				// Cannot replace, we will try to insert
-				insertResult, err := c.collection.InsertOne(c.ctx, md.V)
-				if err != nil {
-					log.Printf("[Database] [%s] insert: %s", path, err)
-					continue
-				}
-				log.Printf("[Database] [%s] inserted %v", path, insertResult.InsertedID)
-			} else {
-				log.Printf("[Database] [%s] replaced [%s]", path, id)
-			}
-		}
-	}
-	return nil
 }

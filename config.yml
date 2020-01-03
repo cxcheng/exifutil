@@ -2,10 +2,6 @@ database:
   drop_first: false
   name: metadata
   uri: "mongodb://localhost:27017"
-  auth:
-    username:
-    password:
-    source:
 input:
   exit_on_error: false
   file_exts: []
@@ -49,10 +45,10 @@ output:
 pipeline:
   import:
     - input
-    - database
+    - dbstore
     - output
   query:
-    - query
+    - dbquery
     - output
 throttle:
   max_cpus: 2
