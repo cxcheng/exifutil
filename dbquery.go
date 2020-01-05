@@ -1,18 +1,18 @@
 package exifutil
 
 import (
-	"flag"
 	"log"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type MetadataDBQuery struct {
 	out PipelineChan
 
-	db   MetadataDB
-	cols []string
+	db      MetadataDB
+	outCols bson.D
 }
 
 func (c *MetadataDBQuery) Init(config *Config) error {
@@ -20,7 +20,11 @@ func (c *MetadataDBQuery) Init(config *Config) error {
 		return err
 	}
 
-	c.cols = config.Output.Cols
+	// Specify list of attributes
+	c.outCols = bson.D{}
+	for _, colName := range config.Output.Cols {
+		c.outCols = append(c.outCols, bson.E{colName, 1})
+	}
 
 	return nil
 }
@@ -36,34 +40,42 @@ func (c *MetadataDBQuery) SetOutput(out PipelineChan) {
 }
 
 func (c *MetadataDBQuery) Run() error {
-	// Setup projection
-
-	for {
-		findOpt := options.FindOptions{}
+	/*
 		for _, arg := range flag.Args()[1:] {
-			path := md.Expr("FileName")
-
-			// Try replace any existing record first, if none, then insert
-			// We do that by using unique keyls
-			id := md.ConstructKey()
-			md.V["_id"] = id
-			replaceResult, err := c.collection.ReplaceOne(c.ctx, bson.M{"_id": id}, md.V)
-			if err != nil {
-				log.Printf("[Database] [%s] replace error: %s", path, err)
-				continue
-			}
-			if replaceResult.MatchedCount == 0 {
-				// Cannot replace, we will try to insert
-				insertResult, err := c.collection.InsertOne(c.ctx, md.V)
-				if err != nil {
-					log.Printf("[Database] [%s] insert: %s", path, err)
-					continue
-				}
-				log.Printf("[Database] [%s] inserted %v", path, insertResult.InsertedID)
-			} else {
-				log.Printf("[Database] [%s] replaced [%s]", path, id)
-			}
 		}
+	*/
+
+	// Make query
+	findOpt := options.FindOptions{}
+	findOpt.SetProjection(c.outCols)
+	cur, err := c.db.collection.Find(c.db.ctx, bson.D{}, &findOpt)
+	if err != nil {
+		return err
 	}
+
+	// Process output
+	defer func() {
+		// Send finish signal
+		c.out <- nil
+		// Close cursor when done
+		cur.Close(c.db.ctx)
+	}()
+	outMsg := PipelineObj{}
+	for cur.Next(c.db.ctx) {
+		var doc map[string]interface{}
+
+		// Decode DB cursor to map
+		if err := cur.Decode(&doc); err != nil {
+			return err
+		}
+		// Pass to next round
+		outMsg.data = []Metadata{Metadata{V: doc}}
+		c.out <- &outMsg
+	}
+
+	if err := cur.Err(); err != nil {
+		return err
+	}
+
 	return nil
 }

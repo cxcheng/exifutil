@@ -37,10 +37,10 @@ type Config struct {
 		Path string   `yaml:"path"`
 		Type string   `yaml:"type"`
 	} `yaml:"output"`
-	Throttle struct {
+	Performance struct {
 		MaxCPUs int `yaml:"max_cpus"`
 		Rate    int `yaml:"rate"`
-	} `yaml:"throttle"`
+	} `yaml:"performance"`
 }
 
 func NewConfig(configPath string) (*Config, error) {
@@ -103,6 +103,13 @@ func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
 	var pipeline *Pipeline = new(Pipeline)
 	var err error
 
+	// Validate and set params
+	if config.Performance.MaxCPUs < 1 {
+		config.Performance.MaxCPUs = 1
+	}
+	// Set queue size to twice the number of CPUs
+	queueSize := config.Performance.MaxCPUs * 2
+
 	// Build pipeline from config
 	pipelineConfig, found := config.Pipeline[pipelineName]
 	if !found {
@@ -114,7 +121,7 @@ func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
 		if component, err = MakePipelineComponent(componentName); component == nil {
 			return nil, err
 		}
-		lastStage = lastStage.Add(componentName, component)
+		lastStage = lastStage.Add(componentName, component, queueSize)
 		if lastStage == nil {
 			return nil, fmt.Errorf("[Pipeline]: Error adding [%s]", componentName)
 		}
@@ -125,7 +132,7 @@ func NewPipeline(config *Config, pipelineName string) (*Pipeline, error) {
 	return pipeline, err
 }
 
-func (p *Pipeline) Add(name string, component PipelineComponent) *Pipeline {
+func (p *Pipeline) Add(name string, component PipelineComponent, queueSize int) *Pipeline {
 	// If first one, return itself after init
 	if p.component == nil {
 		p.name = name
@@ -140,7 +147,7 @@ func (p *Pipeline) Add(name string, component PipelineComponent) *Pipeline {
 	}
 
 	// Add to next stage, and setup input/output
-	out := make(PipelineChan)
+	out := make(PipelineChan, queueSize)
 	p.component.SetOutput(out)
 	component.SetInput(out)
 	p.next = &Pipeline{name: name, component: component, next: nil}

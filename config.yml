@@ -50,6 +50,6 @@ pipeline:
   query:
     - dbquery
     - output
-throttle:
+performance:
   max_cpus: 2
 verbose: true

@@ -62,7 +62,7 @@ func (c *MetadataInput) Init(config *Config) error {
 	}
 
 	// Create reader pool based on Max CPU setting, but limited by number of CPU cores
-	maxCPUs := config.Throttle.MaxCPUs
+	maxCPUs := config.Performance.MaxCPUs
 	if maxCPUs == 0 {
 		maxCPUs = 1
 	}
